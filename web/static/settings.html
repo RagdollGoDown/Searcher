@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Searcher — Settings</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f5;
+    --panel: #ffffff;
+    --text: #1a1a1a;
+    --muted: #6b6b6b;
+    --border: #e0e0e0;
+    --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181c;
+      --panel: #1f2025;
+      --text: #e8e8e8;
+      --muted: #9a9a9a;
+      --border: #2c2d33;
+      --accent: #5b8def;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header h1 {
+    font-size: 16px;
+    margin: 0;
+    font-weight: 600;
+  }
+  header nav {
+    display: flex;
+    gap: 14px;
+  }
+  header nav a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+  }
+  header nav a:hover { text-decoration: underline; }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 24px 20px 60px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+  }
+  section h2 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  section p.hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .field label {
+    font-size: 13px;
+  }
+  .field .field-hint {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  input[type="number"] {
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    width: 140px;
+  }
+  input[type="number"]:focus { outline: 2px solid var(--accent); }
+  button.primary {
+    align-self: flex-start;
+    padding: 8px 18px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: default; }
+  #rag-status {
+    font-size: 13px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Searcher — Settings</h1>
+    <nav>
+      <a href="/">&larr; Chat</a>
+      <a href="/rag.html">Documents</a>
+    </nav>
+  </header>
+  <main>
+    <section id="rag-section">
+      <h2>Document search (RAG) — chunking</h2>
+      <p class="hint">Controls how newly uploaded documents are split before being embedded. Changing these only affects documents you upload after saving — existing documents keep their current chunks.</p>
+      <div class="field">
+        <label for="chunk-chars">Chunk size (characters)</label>
+        <input id="chunk-chars" type="number" min="1" step="50">
+        <span class="field-hint">Max characters per chunk.</span>
+      </div>
+      <div class="field">
+        <label for="chunk-overlap">Chunk overlap (characters)</label>
+        <input id="chunk-overlap" type="number" min="0" step="10">
+        <span class="field-hint">Characters of trailing context repeated at the start of the next chunk. Must be smaller than chunk size.</span>
+      </div>
+      <button id="rag-save" class="primary" type="button">Save</button>
+      <div id="rag-status"></div>
+    </section>
+  </main>
+
+<script>
+(() => {
+  const chunkCharsEl = document.getElementById("chunk-chars");
+  const chunkOverlapEl = document.getElementById("chunk-overlap");
+  const saveBtn = document.getElementById("rag-save");
+  const statusEl = document.getElementById("rag-status");
+
+  async function loadSettings() {
+    try {
+      const res = await fetch("/api/rag/settings");
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || ("failed with status " + res.status));
+      chunkCharsEl.value = data.chunkChars;
+      chunkOverlapEl.value = data.chunkOverlap;
+    } catch (e) {
+      statusEl.textContent = "Could not load settings: " + e.message;
+    }
+  }
+
+  saveBtn.addEventListener("click", async () => {
+    saveBtn.disabled = true;
+    statusEl.textContent = "Saving...";
+    try {
+      const res = await fetch("/api/rag/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chunkChars: parseInt(chunkCharsEl.value, 10),
+          chunkOverlap: parseInt(chunkOverlapEl.value, 10),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || ("failed with status " + res.status));
+      chunkCharsEl.value = data.chunkChars;
+      chunkOverlapEl.value = data.chunkOverlap;
+      statusEl.textContent = "Saved. Applies to documents uploaded from now on.";
+    } catch (e) {
+      statusEl.textContent = "Could not save: " + e.message;
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  loadSettings();
+})();
+</script>
+</body>
+</html>

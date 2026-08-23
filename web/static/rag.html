@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Searcher — Documents</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f5;
+    --panel: #ffffff;
+    --text: #1a1a1a;
+    --muted: #6b6b6b;
+    --border: #e0e0e0;
+    --accent: #2563eb;
+    --accent-soft: rgba(37, 99, 235, 0.12);
+    --danger: #d33;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181c;
+      --panel: #1f2025;
+      --text: #e8e8e8;
+      --muted: #9a9a9a;
+      --border: #2c2d33;
+      --accent: #5b8def;
+      --accent-soft: rgba(91, 141, 239, 0.18);
+      --danger: #e66;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header h1 {
+    font-size: 16px;
+    margin: 0;
+    font-weight: 600;
+  }
+  header nav {
+    display: flex;
+    gap: 14px;
+  }
+  header nav a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+  }
+  header nav a:hover { text-decoration: underline; }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 20px 60px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  #upload-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+  }
+  #upload-panel p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  button.primary {
+    align-self: flex-start;
+    padding: 8px 18px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: default; }
+  #upload-status {
+    font-size: 13px;
+    color: var(--muted);
+    white-space: pre-wrap;
+  }
+  #documents {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .doc-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+  }
+  .doc-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .doc-name {
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .doc-meta {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .doc-delete {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--danger);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .doc-delete:hover {
+    border-color: var(--danger);
+  }
+  #empty-state {
+    font-size: 13px;
+    color: var(--muted);
+  }
+  #storage-summary {
+    font-size: 12px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Searcher — Documents</h1>
+    <nav>
+      <a href="/">&larr; Chat</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+  </header>
+  <main>
+    <div id="upload-panel">
+      <p>Upload documents to make them searchable from the "My Documents" source in chat.</p>
+      <input id="file-input" type="file" multiple accept=".txt,.md,.markdown,.go,.js,.ts,.py,.java,.c,.cpp,.h,.json,.yaml,.yml,.csv,.html,.css,.sh,.rs,.rb,.php,.pdf" style="display:none">
+      <button id="upload-btn" class="primary" type="button">Upload files</button>
+      <div id="upload-status"></div>
+    </div>
+    <div id="storage-summary"></div>
+    <div id="documents"></div>
+    <div id="empty-state" style="display:none">No documents uploaded yet.</div>
+  </main>
+
+<script>
+(() => {
+  const fileInput = document.getElementById("file-input");
+  const uploadBtn = document.getElementById("upload-btn");
+  const uploadStatusEl = document.getElementById("upload-status");
+  const documentsEl = document.getElementById("documents");
+  const emptyStateEl = document.getElementById("empty-state");
+  const storageSummaryEl = document.getElementById("storage-summary");
+
+  function isPDF(file) {
+    return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+  }
+
+  function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  function formatDate(iso) {
+    try {
+      return new Date(iso).toLocaleString();
+    } catch (e) {
+      return iso;
+    }
+  }
+
+  async function loadDocuments() {
+    const res = await fetch("/api/rag/documents");
+    const data = await res.json();
+    const docs = data.documents || [];
+
+    const mb = (data.storageBytes || 0) / (1024 * 1024);
+    storageSummaryEl.textContent = mb.toFixed(2) + " MB used (chunks + metadata)";
+
+    documentsEl.innerHTML = "";
+    emptyStateEl.style.display = docs.length === 0 ? "block" : "none";
+
+    for (const doc of docs) {
+      const row = document.createElement("div");
+      row.className = "doc-row";
+
+      const info = document.createElement("div");
+      info.className = "doc-info";
+
+      const name = document.createElement("div");
+      name.className = "doc-name";
+      name.textContent = doc.name;
+      info.appendChild(name);
+
+      const meta = document.createElement("div");
+      meta.className = "doc-meta";
+      meta.textContent = doc.chunkCount + " chunk" + (doc.chunkCount === 1 ? "" : "s") + " — added " + formatDate(doc.addedAt);
+      info.appendChild(meta);
+
+      row.appendChild(info);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "doc-delete";
+      deleteBtn.type = "button";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.addEventListener("click", () => deleteDocument(doc.id));
+      row.appendChild(deleteBtn);
+
+      documentsEl.appendChild(row);
+    }
+  }
+
+  async function deleteDocument(id) {
+    await fetch("/api/rag/documents/" + id, { method: "DELETE" });
+    await loadDocuments();
+  }
+
+  async function uploadFile(file) {
+    let content, encoding, mimeType;
+    if (isPDF(file)) {
+      content = arrayBufferToBase64(await file.arrayBuffer());
+      encoding = "base64";
+      mimeType = "application/pdf";
+    } else {
+      content = await file.text();
+    }
+
+    const res = await fetch("/api/rag/documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: file.name, content, encoding, mimeType }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      throw new Error(data.error || ("upload failed with status " + res.status));
+    }
+  }
+
+  uploadBtn.addEventListener("click", () => fileInput.click());
+
+  fileInput.addEventListener("change", async () => {
+    const files = Array.from(fileInput.files);
+    fileInput.value = "";
+    if (files.length === 0) return;
+
+    uploadBtn.disabled = true;
+    const errors = [];
+    for (const file of files) {
+      uploadStatusEl.textContent = "Uploading " + file.name + "...";
+      try {
+        await uploadFile(file);
+      } catch (e) {
+        errors.push(file.name + ": " + e.message);
+      }
+    }
+    uploadStatusEl.textContent = errors.length > 0 ? errors.join("\n") : "";
+    uploadBtn.disabled = false;
+    await loadDocuments();
+  });
+
+  loadDocuments();
+})();
+</script>
+</body>
+</html>

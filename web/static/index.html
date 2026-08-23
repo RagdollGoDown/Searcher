@@ -1,0 +1,830 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Searcher</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f5;
+    --panel: #ffffff;
+    --text: #1a1a1a;
+    --muted: #6b6b6b;
+    --border: #e0e0e0;
+    --accent: #2563eb;
+    --accent-soft: rgba(37, 99, 235, 0.12);
+    --user-bubble: #2563eb;
+    --user-text: #ffffff;
+    --assistant-bubble: #eef0f3;
+    --assistant-text: #1a1a1a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181c;
+      --panel: #1f2025;
+      --text: #e8e8e8;
+      --muted: #9a9a9a;
+      --border: #2c2d33;
+      --accent: #5b8def;
+      --accent-soft: rgba(91, 141, 239, 0.18);
+      --user-bubble: #3556a8;
+      --user-text: #ffffff;
+      --assistant-bubble: #2a2b31;
+      --assistant-text: #e8e8e8;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header h1 {
+    font-size: 16px;
+    margin: 0;
+    font-weight: 600;
+  }
+  header nav {
+    display: flex;
+    gap: 14px;
+  }
+  header nav a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+  }
+  header nav a:hover { text-decoration: underline; }
+  #history-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  #history-btn:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  #history-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+  #history-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    z-index: 20;
+  }
+  #history-backdrop.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  #history-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: min(300px, 85vw);
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+    transform: translateX(-100%);
+    transition: transform 0.18s ease;
+    z-index: 21;
+    display: flex;
+    flex-direction: column;
+  }
+  #history-panel.open {
+    transform: translateX(0);
+  }
+  #history-panel-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  #history-panel-header h2 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  #history-close {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 4px;
+  }
+  #history-close:hover { color: var(--text); }
+  #history-new {
+    margin: 10px 12px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px dashed var(--border);
+    background: transparent;
+    color: var(--accent);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  #history-new:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  #history-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 8px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .history-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .history-row:hover {
+    background: var(--accent-soft);
+  }
+  .history-row.active {
+    background: var(--accent-soft);
+  }
+  .history-row-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+  }
+  .history-row-delete {
+    flex-shrink: 0;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    display: inline-flex;
+  }
+  .history-row-delete:hover {
+    color: #d33;
+    background: rgba(211, 51, 51, 0.12);
+  }
+  .history-row-delete svg {
+    width: 14px;
+    height: 14px;
+  }
+  #history-empty {
+    padding: 12px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  #chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .msg {
+    max-width: 70%;
+    padding: 10px 14px;
+    border-radius: 14px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--user-bubble);
+    color: var(--user-text);
+    border-bottom-right-radius: 4px;
+  }
+  .msg.assistant {
+    align-self: flex-start;
+    background: var(--assistant-bubble);
+    color: var(--assistant-text);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.error {
+    align-self: flex-start;
+    background: transparent;
+    color: #d33;
+    border: 1px solid #d33;
+  }
+  .msg.pending {
+    color: var(--muted);
+    font-style: italic;
+  }
+  .msg.assistant {
+    white-space: normal;
+  }
+  .msg.assistant p {
+    margin: 0 0 8px;
+  }
+  .msg.assistant p:last-child {
+    margin-bottom: 0;
+  }
+  .msg.assistant ul, .msg.assistant ol {
+    margin: 4px 0;
+    padding-left: 20px;
+  }
+  .msg.assistant li {
+    margin: 2px 0;
+  }
+  .msg.assistant code {
+    background: rgba(127, 127, 127, 0.2);
+    padding: 1px 4px;
+    border-radius: 4px;
+  }
+  .msg.assistant pre {
+    background: rgba(127, 127, 127, 0.2);
+    padding: 10px 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 6px 0;
+  }
+  .msg.assistant pre code {
+    background: none;
+    padding: 0;
+  }
+  .msg.assistant blockquote {
+    border-left: 3px solid var(--border);
+    margin: 6px 0;
+    padding-left: 10px;
+    color: var(--muted);
+  }
+  .msg.assistant a {
+    color: inherit;
+  }
+  .msg.assistant h1, .msg.assistant h2, .msg.assistant h3 {
+    margin: 8px 0 4px;
+    font-size: 1em;
+  }
+  #composer-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 20px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+  }
+  form#composer {
+    display: flex;
+    gap: 8px;
+  }
+  #input {
+    flex: 1;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    resize: none;
+  }
+  #input:focus { outline: 2px solid var(--accent); }
+  button#send {
+    padding: 0 20px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button#send:disabled { opacity: 0.5; cursor: default; }
+  #sources {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .source-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .source-toggle svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+  }
+  .source-toggle:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .source-toggle[aria-pressed="true"] {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  #attachments-panel {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px 4px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--accent-soft);
+    color: var(--text);
+    font-size: 13px;
+  }
+  .file-chip button {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    padding: 2px 4px;
+  }
+  .file-chip button:hover {
+    color: var(--text);
+  }
+  #attachments-status {
+    width: 100%;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .sources-panel {
+    align-self: flex-start;
+    max-width: 70%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .sources-panel details {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+    padding: 8px 12px;
+  }
+  .sources-panel summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--muted);
+    user-select: none;
+  }
+  .source-result {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .source-result-title {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .source-result-extract {
+    font-size: 12px;
+    color: var(--muted);
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .source-empty {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <button id="history-btn" type="button" title="Conversations" aria-label="Conversations">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+    </button>
+    <h1>Searcher</h1>
+    <nav>
+      <a href="/rag.html">Documents</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+  </header>
+  <div id="history-backdrop"></div>
+  <div id="history-panel">
+    <div id="history-panel-header">
+      <h2>Conversations</h2>
+      <button id="history-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <button id="history-new" type="button">+ New chat</button>
+    <div id="history-list"></div>
+    <div id="history-empty" style="display:none">No saved conversations yet.</div>
+  </div>
+  <div id="chat"></div>
+  <div id="composer-panel">
+    <form id="composer">
+      <textarea id="input" rows="1" placeholder="Ask something..." autofocus></textarea>
+      <button id="send" type="submit">Send</button>
+    </form>
+    <div id="sources"></div>
+    <div id="attachments-panel">
+      <button id="attach-btn" type="button" class="source-toggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
+        <span>Attach files</span>
+      </button>
+      <input id="file-input" type="file" multiple accept=".txt,.md,.markdown,.go,.js,.ts,.py,.java,.c,.cpp,.h,.json,.yaml,.yml,.csv,.html,.css,.sh,.rs,.rb,.php,.pdf" style="display:none">
+      <div id="file-chips"></div>
+      <div id="attachments-status"></div>
+    </div>
+  </div>
+
+<script src="snarkdown.js"></script>
+<script>
+(() => {
+  const chatEl = document.getElementById("chat");
+  const formEl = document.getElementById("composer");
+  const inputEl = document.getElementById("input");
+  const sendBtn = document.getElementById("send");
+  const sourcesEl = document.getElementById("sources");
+  const attachBtn = document.getElementById("attach-btn");
+  const fileInput = document.getElementById("file-input");
+  const fileChipsEl = document.getElementById("file-chips");
+  const attachStatusEl = document.getElementById("attachments-status");
+  const historyBtn = document.getElementById("history-btn");
+  const historyBackdrop = document.getElementById("history-backdrop");
+  const historyPanel = document.getElementById("history-panel");
+  const historyClose = document.getElementById("history-close");
+  const historyNewBtn = document.getElementById("history-new");
+  const historyListEl = document.getElementById("history-list");
+  const historyEmptyEl = document.getElementById("history-empty");
+
+  // Mirrors the server's FilesSource caps (main.go); the server enforces
+  // these regardless, this is just to warn before sending.
+  const MAX_FILE_CHARS = 20000;
+  const MAX_TOTAL_CHARS = 60000;
+  // Mirrors filesMaxPDFBytes in source/files.go.
+  const MAX_PDF_BYTES = 20 * 1024 * 1024;
+
+  const history = [];
+  const enabledSources = new Set();
+  const attachedFiles = []; // { name, content, encoding?, mimeType? }
+  // currentConversationId is null until the first turn of a chat gets
+  // saved server-side (which mints one), or until a past conversation is
+  // loaded from the history panel. A page load/refresh always starts
+  // blank, matching the "never silently resume" behavior chosen for this.
+  let currentConversationId = null;
+
+  function addBubble(role, text) {
+    const div = document.createElement("div");
+    div.className = "msg " + role;
+    div.textContent = text;
+    chatEl.appendChild(div);
+    chatEl.scrollTop = chatEl.scrollHeight;
+    return div;
+  }
+
+  async function loadSources() {
+    try {
+      const res = await fetch("/api/sources");
+      const data = await res.json();
+      for (const { name, icon } of data.sources || []) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "source-toggle";
+        btn.setAttribute("aria-pressed", "false");
+        btn.innerHTML = icon + "<span>" + name + "</span>";
+        btn.addEventListener("click", () => {
+          const active = btn.getAttribute("aria-pressed") === "true";
+          btn.setAttribute("aria-pressed", String(!active));
+          if (active) enabledSources.delete(name);
+          else enabledSources.add(name);
+        });
+        sourcesEl.appendChild(btn);
+      }
+    } catch (e) {
+      // Sources are optional UI sugar; a plain chat still works without them.
+    }
+  }
+
+  function isLikelyBinary(text) {
+    return text.indexOf(String.fromCharCode(0)) !== -1;
+  }
+
+  function isPDF(file) {
+    return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+  }
+
+  function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  function renderFileChips() {
+    fileChipsEl.innerHTML = "";
+    attachedFiles.forEach((file, i) => {
+      const chip = document.createElement("span");
+      chip.className = "file-chip";
+
+      const nameEl = document.createElement("span");
+      nameEl.textContent = file.name;
+      chip.appendChild(nameEl);
+
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.textContent = "\u00D7";
+      removeBtn.setAttribute("aria-label", "Remove " + file.name);
+      removeBtn.addEventListener("click", () => {
+        attachedFiles.splice(i, 1);
+        renderFileChips();
+        updateAttachmentsStatus();
+      });
+      chip.appendChild(removeBtn);
+
+      fileChipsEl.appendChild(chip);
+    });
+  }
+
+  function updateAttachmentsStatus(warnings) {
+    const parts = [];
+    if (attachedFiles.length > 0) {
+      const total = attachedFiles.reduce((sum, f) => sum + f.content.length, 0);
+      parts.push(total.toLocaleString() + " / " + MAX_TOTAL_CHARS.toLocaleString() + " chars");
+    }
+    if (warnings && warnings.length > 0) parts.push(...warnings);
+    attachStatusEl.textContent = parts.join(" \u2014 ");
+  }
+
+  attachBtn.addEventListener("click", () => fileInput.click());
+
+  fileInput.addEventListener("change", async () => {
+    const warnings = [];
+    for (const file of fileInput.files) {
+      if (isPDF(file)) {
+        if (file.size > MAX_PDF_BYTES) {
+          warnings.push('Skipped "' + file.name + '": exceeds the ' + (MAX_PDF_BYTES / (1024 * 1024)) + ' MB PDF size limit.');
+          continue;
+        }
+        const content = arrayBufferToBase64(await file.arrayBuffer());
+        attachedFiles.push({ name: file.name, content, encoding: "base64", mimeType: "application/pdf" });
+        continue;
+      }
+
+      const content = await file.text();
+      if (isLikelyBinary(content)) {
+        warnings.push('Skipped "' + file.name + '": looks like a binary file.');
+        continue;
+      }
+      if (content.length > MAX_FILE_CHARS) {
+        warnings.push('"' + file.name + '" will be truncated to ' + MAX_FILE_CHARS.toLocaleString() + ' chars.');
+      }
+      attachedFiles.push({ name: file.name, content });
+    }
+    fileInput.value = "";
+    renderFileChips();
+    updateAttachmentsStatus(warnings);
+  });
+
+  // renderSourcesPanel builds a collapsible-per-source breakdown of what
+  // was actually retrieved for a searchAndSummarize reply, or returns null
+  // if sources is empty (a plain chat, with no search performed).
+  function renderSourcesPanel(sources) {
+    if (!sources || sources.length === 0) return null;
+
+    const panel = document.createElement("div");
+    panel.className = "sources-panel";
+
+    for (const group of sources) {
+      const details = document.createElement("details");
+
+      const summary = document.createElement("summary");
+      const count = group.results.length;
+      summary.textContent = group.source + " (" + count + (count === 1 ? " result" : " results") + ")";
+      details.appendChild(summary);
+
+      if (count === 0) {
+        const empty = document.createElement("div");
+        empty.className = "source-empty";
+        empty.textContent = "No results.";
+        details.appendChild(empty);
+      } else {
+        for (const r of group.results) {
+          const item = document.createElement("div");
+          item.className = "source-result";
+
+          const title = document.createElement("div");
+          title.className = "source-result-title";
+          title.textContent = r.title;
+          item.appendChild(title);
+
+          const extract = document.createElement("div");
+          extract.className = "source-result-extract";
+          extract.textContent = r.extract;
+          item.appendChild(extract);
+
+          details.appendChild(item);
+        }
+      }
+
+      panel.appendChild(details);
+    }
+
+    return panel;
+  }
+
+  const deleteIconSVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>';
+
+  function openHistoryPanel() {
+    historyBackdrop.classList.add("open");
+    historyPanel.classList.add("open");
+    loadConversationList();
+  }
+
+  function closeHistoryPanel() {
+    historyBackdrop.classList.remove("open");
+    historyPanel.classList.remove("open");
+  }
+
+  async function loadConversationList() {
+    try {
+      const res = await fetch("/api/conversations");
+      const data = await res.json();
+      renderConversationList(data.conversations || []);
+    } catch (e) {
+      // Conversation history is optional UI sugar; chat still works
+      // without it.
+    }
+  }
+
+  function renderConversationList(conversations) {
+    historyListEl.innerHTML = "";
+    historyEmptyEl.style.display = conversations.length === 0 ? "block" : "none";
+
+    for (const convo of conversations) {
+      const row = document.createElement("div");
+      row.className = "history-row" + (convo.id === currentConversationId ? " active" : "");
+      row.addEventListener("click", () => loadConversation(convo.id));
+
+      const title = document.createElement("div");
+      title.className = "history-row-title";
+      title.textContent = convo.title;
+      row.appendChild(title);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "history-row-delete";
+      deleteBtn.type = "button";
+      deleteBtn.title = "Delete conversation";
+      deleteBtn.setAttribute("aria-label", "Delete conversation");
+      deleteBtn.innerHTML = deleteIconSVG;
+      deleteBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteConversation(convo.id);
+      });
+      row.appendChild(deleteBtn);
+
+      historyListEl.appendChild(row);
+    }
+  }
+
+  function startNewChat() {
+    currentConversationId = null;
+    history.length = 0;
+    chatEl.innerHTML = "";
+    closeHistoryPanel();
+  }
+
+  async function loadConversation(id) {
+    const res = await fetch("/api/conversations/" + id + "/messages");
+    const data = await res.json();
+
+    currentConversationId = id;
+    history.length = 0;
+    chatEl.innerHTML = "";
+
+    for (const m of data.messages || []) {
+      history.push({ role: m.role, content: m.content });
+      const bubble = addBubble(m.role, m.content);
+      if (m.role === "assistant") bubble.innerHTML = snarkdown(m.content);
+    }
+
+    closeHistoryPanel();
+  }
+
+  async function deleteConversation(id) {
+    await fetch("/api/conversations/" + id, { method: "DELETE" });
+    if (id === currentConversationId) startNewChat();
+    loadConversationList();
+  }
+
+  historyBtn.addEventListener("click", openHistoryPanel);
+  historyClose.addEventListener("click", closeHistoryPanel);
+  historyBackdrop.addEventListener("click", closeHistoryPanel);
+  historyNewBtn.addEventListener("click", startNewChat);
+
+  async function sendMessage(text) {
+    history.push({ role: "user", content: text });
+    addBubble("user", text);
+
+    const pending = addBubble("assistant pending", "Thinking...");
+    sendBtn.disabled = true;
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: history,
+          sources: Array.from(enabledSources),
+          files: attachedFiles.map(({ name, content, encoding, mimeType }) => ({ name, content, encoding, mimeType })),
+          conversationId: currentConversationId || 0,
+        }),
+      });
+      const data = await res.json();
+      pending.classList.remove("pending");
+      if (!res.ok || data.error) {
+        pending.classList.add("error");
+        pending.textContent = data.error || "Something went wrong.";
+        history.pop();
+        return;
+      }
+      pending.innerHTML = snarkdown(data.reply);
+      history.push({ role: "assistant", content: data.reply });
+      if (data.conversationId) currentConversationId = data.conversationId;
+
+      const sourcesPanel = renderSourcesPanel(data.sources);
+      if (sourcesPanel) {
+        pending.insertAdjacentElement("afterend", sourcesPanel);
+        chatEl.scrollTop = chatEl.scrollHeight;
+      }
+    } catch (e) {
+      pending.classList.remove("pending");
+      pending.classList.add("error");
+      pending.textContent = "Request failed: " + e.message;
+      history.pop();
+    } finally {
+      sendBtn.disabled = false;
+    }
+  }
+
+  formEl.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = inputEl.value.trim();
+    if (!text) return;
+    inputEl.value = "";
+    sendMessage(text);
+  });
+
+  inputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      formEl.requestSubmit();
+    }
+  });
+
+  loadSources();
+})();
+</script>
+</body>
+</html>

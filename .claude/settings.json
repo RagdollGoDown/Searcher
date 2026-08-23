@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-Command ollama -ErrorAction SilentlyContinue)",
+      "PowerShell(ollama list 2>&1)",
+      "PowerShell(ollama list)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" build -o main.exe .)",
+      "PowerShell(Invoke-RestMethod -Uri \"http://localhost:8080/api/sources\" -Method Get)",
+      "Bash(go get *)",
+      "Bash(go doc *)",
+      "Bash(go build *)",
+      "Bash(go vet *)",
+      "Bash(mkdir -p \"c:/Users/Cadet/Documents/GenericCodingProjects/Searcher/cmd/pdftest\")",
+      "Bash(cp \"C:/Users/Cadet/AppData/Local/Temp/claude/c--Users-Cadet-Documents-GenericCodingProjects-Searcher/6067f237-07bd-497b-891d-457eb188d271/scratchpad/pdftest/main.go\" \"c:/Users/Cadet/Documents/GenericCodingProjects/Searcher/cmd/pdftest/main.go\")",
+      "Bash(go mod *)",
+      "PowerShell(go get modernc.org/sqlite)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" get modernc.org/sqlite)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" build ./... 2>&1)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" vet ./... 2>&1)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" build -o searcher.exe . 2>&1)",
+      "PowerShell(ollama pull nomic-embed-text)",
+      "PowerShell(Invoke-RestMethod -Uri \"http://localhost:8080/api/rag/documents\" -Method Get)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" run \"C:\\\\Users\\\\Cadet\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Cadet-Documents-GenericCodingProjects-Searcher\\\\16356924-e1e0-4b97-95df-3a3c86bf2e48\\\\scratchpad\\\\inspect_chunk.go\" 2>&1)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" build ./store/... 2>&1)"
+    ]
+  }
+}
