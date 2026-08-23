@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"searcher/llm"
+	"searcher/scraper"
 	"searcher/source"
 	"searcher/store"
 	"searcher/web"
@@ -38,16 +39,27 @@ func main() {
 	}
 	defer db.Close()
 
-	ragSource := source.NewRAGSource(db, embedder, 5, 2000, 8000)
+	ragSource := source.NewRAGSource(db, embedder, 2000, 8000)
+	crawler := scraper.NewCrawler(db, ragSource)
+
+	if n, err := db.RecoverInterruptedCrawlJobs(context.Background()); err != nil {
+		fmt.Printf("Got error recovering interrupted crawl jobs: %s\n", err)
+	} else if n > 0 {
+		fmt.Printf("Marked %d interrupted crawl job(s) failed after restart\n", n)
+	}
 
 	sources := map[string]source.Source{
 		"Wikipedia":    source.NewWikipediaSource("en", 5),
 		"Fake":         source.NewFakeSource(),
 		"Local Files":  source.NewFilesSource(20000, 60000),
 		"My Documents": ragSource,
+		// The scraper deliberately has no entry here: it's not a Source
+		// itself (no Fetch/Icon) — crawled pages are ingested into the
+		// same store "My Documents" already searches, so that source
+		// covers scraped content too, with no separate retrieval path.
 	}
 
-	server := web.NewServer(client, sources, ragSource, db)
+	server := web.NewServer(client, sources, ragSource, crawler, db)
 	handler, err := server.Handler()
 	if err != nil {
 		fmt.Printf("Got error setting up web server: %s", err)

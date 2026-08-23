@@ -130,6 +130,17 @@
     font-size: 12px;
     color: var(--muted);
   }
+  .doc-source {
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .doc-source a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .doc-source a:hover { text-decoration: underline; }
   .doc-delete {
     flex-shrink: 0;
     padding: 6px 12px;
@@ -159,6 +170,7 @@
     <h1>Searcher — Documents</h1>
     <nav>
       <a href="/">&larr; Chat</a>
+      <a href="/scraper.html">Scraper</a>
       <a href="/settings.html">Settings</a>
     </nav>
   </header>
@@ -170,6 +182,8 @@
       <div id="upload-status"></div>
     </div>
     <div id="storage-summary"></div>
+    <div id="domain-groups-label" class="doc-meta" style="display:none">Delete all documents from a domain</div>
+    <div id="domain-groups"></div>
     <div id="documents"></div>
     <div id="empty-state" style="display:none">No documents uploaded yet.</div>
   </main>
@@ -182,6 +196,8 @@
   const documentsEl = document.getElementById("documents");
   const emptyStateEl = document.getElementById("empty-state");
   const storageSummaryEl = document.getElementById("storage-summary");
+  const domainGroupsLabelEl = document.getElementById("domain-groups-label");
+  const domainGroupsEl = document.getElementById("domain-groups");
 
   function isPDF(file) {
     return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
@@ -216,6 +232,8 @@
     documentsEl.innerHTML = "";
     emptyStateEl.style.display = docs.length === 0 ? "block" : "none";
 
+    renderDomainGroups(docs);
+
     for (const doc of docs) {
       const row = document.createElement("div");
       row.className = "doc-row";
@@ -233,6 +251,18 @@
       meta.textContent = doc.chunkCount + " chunk" + (doc.chunkCount === 1 ? "" : "s") + " — added " + formatDate(doc.addedAt);
       info.appendChild(meta);
 
+      if (doc.sourceUrl) {
+        const sourceEl = document.createElement("div");
+        sourceEl.className = "doc-source";
+        const link = document.createElement("a");
+        link.href = doc.sourceUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = doc.sourceUrl;
+        sourceEl.appendChild(link);
+        info.appendChild(sourceEl);
+      }
+
       row.appendChild(info);
 
       const deleteBtn = document.createElement("button");
@@ -248,6 +278,60 @@
 
   async function deleteDocument(id) {
     await fetch("/api/rag/documents/" + id, { method: "DELETE" });
+    await loadDocuments();
+  }
+
+  // renderDomainGroups shows one row per distinct domain found among docs'
+  // sourceUrl (i.e. scraped, not uploaded, documents), each with a count
+  // and a button to delete every document from that domain in one action.
+  function renderDomainGroups(docs) {
+    const counts = new Map();
+    for (const doc of docs) {
+      if (!doc.sourceUrl) continue;
+      let host;
+      try {
+        host = new URL(doc.sourceUrl).hostname;
+      } catch (e) {
+        continue;
+      }
+      counts.set(host, (counts.get(host) || 0) + 1);
+    }
+
+    domainGroupsEl.innerHTML = "";
+    domainGroupsLabelEl.style.display = counts.size === 0 ? "none" : "block";
+
+    for (const [domain, count] of counts) {
+      const row = document.createElement("div");
+      row.className = "doc-row";
+
+      const info = document.createElement("div");
+      info.className = "doc-info";
+
+      const name = document.createElement("div");
+      name.className = "doc-name";
+      name.textContent = domain;
+      info.appendChild(name);
+
+      const meta = document.createElement("div");
+      meta.className = "doc-meta";
+      meta.textContent = count + " document" + (count === 1 ? "" : "s");
+      info.appendChild(meta);
+
+      row.appendChild(info);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "doc-delete";
+      deleteBtn.type = "button";
+      deleteBtn.textContent = "Delete all";
+      deleteBtn.addEventListener("click", () => deleteDomain(domain));
+      row.appendChild(deleteBtn);
+
+      domainGroupsEl.appendChild(row);
+    }
+  }
+
+  async function deleteDomain(domain) {
+    await fetch("/api/rag/documents/by-domain/" + encodeURIComponent(domain), { method: "DELETE" });
     await loadDocuments();
   }
 

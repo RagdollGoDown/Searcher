@@ -13,6 +13,10 @@ type Attachment struct {
 	// used by Sources that need to know how to interpret Content. Empty
 	// means plain text.
 	MimeType string
+	// SourceURL is the URL a scraped page's content was fetched from.
+	// Empty for attachments that didn't come from a crawl (e.g. browser
+	// uploads).
+	SourceURL string
 }
 
 type Query struct {

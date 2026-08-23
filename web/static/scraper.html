@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Searcher — Scraper</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f5;
+    --panel: #ffffff;
+    --text: #1a1a1a;
+    --muted: #6b6b6b;
+    --border: #e0e0e0;
+    --accent: #2563eb;
+    --accent-soft: rgba(37, 99, 235, 0.12);
+    --danger: #d33;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181c;
+      --panel: #1f2025;
+      --text: #e8e8e8;
+      --muted: #9a9a9a;
+      --border: #2c2d33;
+      --accent: #5b8def;
+      --accent-soft: rgba(91, 141, 239, 0.18);
+      --danger: #e66;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header h1 {
+    font-size: 16px;
+    margin: 0;
+    font-weight: 600;
+  }
+  header nav {
+    display: flex;
+    gap: 14px;
+  }
+  header nav a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+  }
+  header nav a:hover { text-decoration: underline; }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 20px 60px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  #crawl-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+  }
+  #crawl-panel p.hint {
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .field label {
+    font-size: 13px;
+  }
+  .field .field-hint {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  input[type="text"], input[type="number"] {
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+  }
+  input[type="text"] { width: 100%; }
+  input[type="number"] { width: 120px; }
+  input:focus { outline: 2px solid var(--accent); }
+  .checkbox-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .params-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  button.primary {
+    align-self: flex-start;
+    padding: 8px 18px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: default; }
+  #crawl-status {
+    font-size: 13px;
+    color: var(--muted);
+    white-space: pre-wrap;
+  }
+  #jobs {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .job-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+  }
+  .job-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .job-url {
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .job-meta {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .job-meta .status-running, .job-meta .status-pending {
+    color: var(--accent);
+  }
+  .job-meta .status-failed, .job-meta .status-cancelled {
+    color: var(--danger);
+  }
+  .job-action {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--danger);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .job-action:hover {
+    border-color: var(--danger);
+  }
+  #empty-state {
+    font-size: 13px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Searcher — Scraper</h1>
+    <nav>
+      <a href="/">&larr; Chat</a>
+      <a href="/rag.html">Documents</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+  </header>
+  <main>
+    <div id="crawl-panel">
+      <p class="hint">Crawl a website and add its pages to "My Documents" so you can ask questions about it in chat.</p>
+      <div class="field">
+        <label for="root-url">Root URL</label>
+        <input id="root-url" type="text" placeholder="https://example.com">
+      </div>
+      <div class="params-row">
+        <div class="field">
+          <label for="max-depth">Max depth</label>
+          <input id="max-depth" type="number" min="1" placeholder="default">
+        </div>
+        <div class="field">
+          <label for="max-pages">Max pages</label>
+          <input id="max-pages" type="number" min="1" placeholder="default">
+        </div>
+      </div>
+      <label class="checkbox-field">
+        <input id="same-domain-only" type="checkbox" checked>
+        Stay on the same domain
+      </label>
+      <button id="crawl-btn" class="primary" type="button">Start crawl</button>
+      <div id="crawl-status"></div>
+    </div>
+    <div id="jobs"></div>
+    <div id="empty-state" style="display:none">No crawls yet.</div>
+  </main>
+
+<script>
+(() => {
+  const rootUrlEl = document.getElementById("root-url");
+  const maxDepthEl = document.getElementById("max-depth");
+  const maxPagesEl = document.getElementById("max-pages");
+  const sameDomainOnlyEl = document.getElementById("same-domain-only");
+  const crawlBtn = document.getElementById("crawl-btn");
+  const crawlStatusEl = document.getElementById("crawl-status");
+  const jobsEl = document.getElementById("jobs");
+  const emptyStateEl = document.getElementById("empty-state");
+
+  let pollTimer = null;
+
+  function formatDate(iso) {
+    try {
+      return new Date(iso).toLocaleString();
+    } catch (e) {
+      return iso;
+    }
+  }
+
+  function isActive(status) {
+    return status === "pending" || status === "running";
+  }
+
+  async function loadJobs() {
+    const res = await fetch("/api/scraper/jobs");
+    const data = await res.json();
+    const jobs = data.jobs || [];
+
+    jobsEl.innerHTML = "";
+    emptyStateEl.style.display = jobs.length === 0 ? "block" : "none";
+
+    for (const job of jobs) {
+      const row = document.createElement("div");
+      row.className = "job-row";
+
+      const info = document.createElement("div");
+      info.className = "job-info";
+
+      const url = document.createElement("div");
+      url.className = "job-url";
+      url.textContent = job.rootUrl;
+      info.appendChild(url);
+
+      const meta = document.createElement("div");
+      meta.className = "job-meta";
+      const statusSpan = document.createElement("span");
+      statusSpan.className = "status-" + job.status;
+      statusSpan.textContent = job.status;
+      meta.appendChild(statusSpan);
+      meta.appendChild(document.createTextNode(
+        " — " + job.pagesCrawled + " page" + (job.pagesCrawled === 1 ? "" : "s") + " crawled" +
+        (job.pagesFailed > 0 ? ", " + job.pagesFailed + " failed" : "") +
+        " — " + formatDate(job.updatedAt)
+      ));
+      if (job.errorMessage) {
+        meta.appendChild(document.createElement("br"));
+        meta.appendChild(document.createTextNode(job.errorMessage));
+      }
+      info.appendChild(meta);
+
+      row.appendChild(info);
+
+      const actionBtn = document.createElement("button");
+      actionBtn.className = "job-action";
+      actionBtn.type = "button";
+      actionBtn.textContent = isActive(job.status) ? "Cancel" : "Delete";
+      actionBtn.addEventListener("click", () => cancelOrDeleteJob(job.id));
+      row.appendChild(actionBtn);
+
+      jobsEl.appendChild(row);
+    }
+
+    const anyActive = jobs.some((j) => isActive(j.status));
+    if (anyActive && !pollTimer) {
+      pollTimer = setTimeout(() => { pollTimer = null; loadJobs(); }, 2000);
+    } else if (!anyActive && pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  async function cancelOrDeleteJob(id) {
+    await fetch("/api/scraper/jobs/" + id, { method: "DELETE" });
+    await loadJobs();
+  }
+
+  crawlBtn.addEventListener("click", async () => {
+    const rootUrl = rootUrlEl.value.trim();
+    if (!rootUrl) {
+      crawlStatusEl.textContent = "Root URL is required.";
+      return;
+    }
+
+    crawlBtn.disabled = true;
+    crawlStatusEl.textContent = "Starting crawl...";
+    try {
+      const res = await fetch("/api/scraper/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rootUrl,
+          maxDepth: parseInt(maxDepthEl.value, 10) || 0,
+          maxPages: parseInt(maxPagesEl.value, 10) || 0,
+          sameDomainOnly: sameDomainOnlyEl.checked,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || ("failed with status " + res.status));
+      crawlStatusEl.textContent = "";
+      rootUrlEl.value = "";
+      await loadJobs();
+    } catch (e) {
+      crawlStatusEl.textContent = "Could not start crawl: " + e.message;
+    } finally {
+      crawlBtn.disabled = false;
+    }
+  });
+
+  loadJobs();
+})();
+</script>
+</body>
+</html>

@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -18,10 +19,15 @@ import (
 const (
 	settingChunkChars   = "rag.chunk_chars"
 	settingChunkOverlap = "rag.chunk_overlap"
+	settingTopK         = "rag.top_k"
 )
 
 const ragDefaultMaxChunkChars = 2000
 const ragDefaultMaxTotalChars = 8000
+
+// ragDefaultTopK is how many chunks a query retrieves when TopK hasn't
+// been explicitly configured.
+const ragDefaultTopK = 5
 
 // ragIcon is a magnifying-glass-over-document glyph.
 const ragIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">` +
@@ -41,15 +47,15 @@ const ragIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
 type RAGSource struct {
 	store         *store.Store
 	embedder      llm.Embedder
-	topK          int
 	maxChunkChars int
 	maxTotalChars int
 }
 
-// NewRAGSource creates a RAGSource retrieving up to topK chunks per query
-// from st, embedding the query text with embedder.
-func NewRAGSource(st *store.Store, embedder llm.Embedder, topK, maxChunkChars, maxTotalChars int) *RAGSource {
-	return &RAGSource{store: st, embedder: embedder, topK: topK, maxChunkChars: maxChunkChars, maxTotalChars: maxTotalChars}
+// NewRAGSource creates a RAGSource retrieving from st, embedding the query
+// text with embedder. How many chunks a query retrieves is configured via
+// Settings.TopK (see GetSettings/SetSettings), not fixed at construction.
+func NewRAGSource(st *store.Store, embedder llm.Embedder, maxChunkChars, maxTotalChars int) *RAGSource {
+	return &RAGSource{store: st, embedder: embedder, maxChunkChars: maxChunkChars, maxTotalChars: maxTotalChars}
 }
 
 // Compile-time check that RAGSource satisfies Source.
@@ -71,12 +77,17 @@ func (s *RAGSource) Fetch(q query.Query) ([]Result, error) {
 
 	ctx := context.Background()
 
+	settings, err := s.GetSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("rag: reading settings: %w", err)
+	}
+
 	vec, err := s.embedder.Embed(ctx, q.GetQuery())
 	if err != nil {
 		return nil, fmt.Errorf("rag: embedding query: %w", err)
 	}
 
-	chunks, err := s.store.SearchChunks(ctx, vec, s.topK)
+	chunks, err := s.store.SearchChunks(ctx, vec, settings.TopK)
 	if err != nil {
 		return nil, fmt.Errorf("rag: searching chunks: %w", err)
 	}
@@ -114,6 +125,7 @@ type DocumentInfo struct {
 	ID         int64
 	Name       string
 	MimeType   string
+	SourceURL  string
 	AddedAt    time.Time
 	ChunkCount int
 }
@@ -121,14 +133,14 @@ type DocumentInfo struct {
 // Ingest turns an attachment (e.g. a file uploaded through the RAG
 // management page) into plain text, chunks it, embeds each chunk, and
 // stores it as a new document. It returns the new document's ID. Chunking
-// uses the currently configured ChunkSettings; changing them only affects
+// uses the currently configured Settings; changing them only affects
 // documents ingested afterward.
 func (s *RAGSource) Ingest(ctx context.Context, a query.Attachment) (int64, error) {
 	content := resolveContent(a)
 
-	cs, err := s.GetChunkSettings(ctx)
+	cs, err := s.GetSettings(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("rag: reading chunk settings: %w", err)
+		return 0, fmt.Errorf("rag: reading settings: %w", err)
 	}
 
 	chunks := store.ChunkText(content, cs.ChunkChars, cs.ChunkOverlap)
@@ -136,7 +148,7 @@ func (s *RAGSource) Ingest(ctx context.Context, a query.Attachment) (int64, erro
 		return 0, fmt.Errorf("rag: document has no extractable text")
 	}
 
-	docID, err := s.store.AddDocument(ctx, a.Name, a.MimeType)
+	docID, err := s.store.AddDocument(ctx, a.Name, a.MimeType, a.SourceURL)
 	if err != nil {
 		return 0, fmt.Errorf("rag: adding document: %w", err)
 	}
@@ -166,7 +178,7 @@ func (s *RAGSource) ListDocuments(ctx context.Context) ([]DocumentInfo, error) {
 
 	infos := make([]DocumentInfo, len(docs))
 	for i, d := range docs {
-		infos[i] = DocumentInfo{ID: d.ID, Name: d.Name, MimeType: d.MimeType, AddedAt: d.AddedAt, ChunkCount: d.ChunkCount}
+		infos[i] = DocumentInfo{ID: d.ID, Name: d.Name, MimeType: d.MimeType, SourceURL: d.SourceURL, AddedAt: d.AddedAt, ChunkCount: d.ChunkCount}
 	}
 	return infos, nil
 }
@@ -176,50 +188,93 @@ func (s *RAGSource) DeleteDocument(ctx context.Context, id int64) error {
 	return s.store.DeleteDocument(ctx, id)
 }
 
+// DeleteDocumentsByDomain removes every stored document whose SourceURL's
+// host matches domain exactly (e.g. "example.com") — the same host
+// comparison the scraper uses for its same-domain crawl restriction.
+// Documents with no SourceURL (e.g. browser uploads) are never matched.
+// Returns how many documents were deleted.
+func (s *RAGSource) DeleteDocumentsByDomain(ctx context.Context, domain string) (int, error) {
+	docs, err := s.store.ListDocuments(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	var deleted int
+	for _, d := range docs {
+		if d.SourceURL == "" {
+			continue
+		}
+		u, err := url.Parse(d.SourceURL)
+		if err != nil || u.Hostname() != domain {
+			continue
+		}
+		if err := s.store.DeleteDocument(ctx, d.ID); err != nil {
+			return deleted, err
+		}
+		deleted++
+	}
+	return deleted, nil
+}
+
 // StorageSizeBytes returns the on-disk size of the RAG store's database
 // file, covering both document metadata and chunk content/embeddings.
 func (s *RAGSource) StorageSizeBytes() (int64, error) {
 	return s.store.SizeBytes()
 }
 
-// ChunkSettings are the parameters used to split newly ingested documents
-// into chunks. Changing them (via SetChunkSettings) only affects documents
-// ingested afterward — existing chunks are never rebuilt.
-type ChunkSettings struct {
+// Settings are RAGSource's persisted, user-configurable parameters:
+// ChunkChars/ChunkOverlap control how newly ingested documents are split
+// (changing them, via SetSettings, only affects documents ingested
+// afterward — existing chunks are never rebuilt), while TopK controls how
+// many chunks a query retrieves (changing it takes effect on the very next
+// query, since retrieval reads it fresh each time).
+type Settings struct {
 	ChunkChars   int
 	ChunkOverlap int
+	TopK         int
 }
 
-// GetChunkSettings returns the chunk settings currently configured,
-// falling back to store.DefaultChunkChars/DefaultChunkOverlap for any
-// value that hasn't been explicitly set. It always reads through to the
-// store rather than caching, since it's only called once per document
-// upload — negligible next to that upload's embedding calls — and a cached
-// copy would risk going stale relative to the stored value.
-func (s *RAGSource) GetChunkSettings(ctx context.Context) (ChunkSettings, error) {
+// GetSettings returns the settings currently configured, falling back to
+// store.DefaultChunkChars/DefaultChunkOverlap/ragDefaultTopK for any value
+// that hasn't been explicitly set. It always reads through to the store
+// rather than caching: for chunk settings that's negligible next to an
+// upload's embedding calls, and for TopK it's what makes a change take
+// effect immediately for the next query rather than needing a restart.
+func (s *RAGSource) GetSettings(ctx context.Context) (Settings, error) {
 	chars, err := s.getIntSetting(ctx, settingChunkChars, store.DefaultChunkChars)
 	if err != nil {
-		return ChunkSettings{}, err
+		return Settings{}, err
 	}
 	overlap, err := s.getIntSetting(ctx, settingChunkOverlap, store.DefaultChunkOverlap)
 	if err != nil {
-		return ChunkSettings{}, err
+		return Settings{}, err
 	}
-	return ChunkSettings{ChunkChars: chars, ChunkOverlap: overlap}, nil
+	topK, err := s.getIntSetting(ctx, settingTopK, ragDefaultTopK)
+	if err != nil {
+		return Settings{}, err
+	}
+	return Settings{ChunkChars: chars, ChunkOverlap: overlap, TopK: topK}, nil
 }
 
-// SetChunkSettings persists cs for documents ingested from now on.
-func (s *RAGSource) SetChunkSettings(ctx context.Context, cs ChunkSettings) error {
+// SetSettings persists cs: ChunkChars/ChunkOverlap for documents ingested
+// from now on, TopK for queries from now on.
+func (s *RAGSource) SetSettings(ctx context.Context, cs Settings) error {
 	if cs.ChunkChars <= 0 {
 		return fmt.Errorf("rag: chunk size must be positive")
 	}
 	if cs.ChunkOverlap < 0 || cs.ChunkOverlap >= cs.ChunkChars {
 		return fmt.Errorf("rag: chunk overlap must be non-negative and smaller than chunk size")
 	}
+	if cs.TopK <= 0 {
+		return fmt.Errorf("rag: number of chunks retrieved must be positive")
+	}
 	if err := s.store.SetSetting(ctx, settingChunkChars, strconv.Itoa(cs.ChunkChars)); err != nil {
 		return err
 	}
-	return s.store.SetSetting(ctx, settingChunkOverlap, strconv.Itoa(cs.ChunkOverlap))
+	if err := s.store.SetSetting(ctx, settingChunkOverlap, strconv.Itoa(cs.ChunkOverlap)); err != nil {
+		return err
+	}
+	return s.store.SetSetting(ctx, settingTopK, strconv.Itoa(cs.TopK))
 }
 
 // getIntSetting returns the int stored under key, or def if it's unset or

@@ -130,12 +130,13 @@
     <nav>
       <a href="/">&larr; Chat</a>
       <a href="/rag.html">Documents</a>
+      <a href="/scraper.html">Scraper</a>
     </nav>
   </header>
   <main>
     <section id="rag-section">
-      <h2>Document search (RAG) — chunking</h2>
-      <p class="hint">Controls how newly uploaded documents are split before being embedded. Changing these only affects documents you upload after saving — existing documents keep their current chunks.</p>
+      <h2>Document search (RAG)</h2>
+      <p class="hint">Chunk size and overlap control how newly uploaded documents are split before being embedded — changing them only affects documents you upload after saving, existing documents keep their current chunks. Chunks retrieved applies immediately to your next query.</p>
       <div class="field">
         <label for="chunk-chars">Chunk size (characters)</label>
         <input id="chunk-chars" type="number" min="1" step="50">
@@ -146,8 +147,31 @@
         <input id="chunk-overlap" type="number" min="0" step="10">
         <span class="field-hint">Characters of trailing context repeated at the start of the next chunk. Must be smaller than chunk size.</span>
       </div>
+      <div class="field">
+        <label for="top-k">Chunks retrieved per query</label>
+        <input id="top-k" type="number" min="1" step="1">
+        <span class="field-hint">How many of the most similar chunks "My Documents" fetches for each chat query. Higher finds more context but can dilute the answer with less relevant chunks.</span>
+      </div>
       <button id="rag-save" class="primary" type="button">Save</button>
       <div id="rag-status"></div>
+    </section>
+    <section id="scraper-section">
+      <h2>Website scraper — defaults</h2>
+      <p class="hint">Defaults used when a crawl doesn't specify its own max depth or max pages. The polite delay is applied before every page fetch after the first, to avoid hammering the crawled site.</p>
+      <div class="field">
+        <label for="scraper-max-depth">Default max depth</label>
+        <input id="scraper-max-depth" type="number" min="1" step="1">
+      </div>
+      <div class="field">
+        <label for="scraper-max-pages">Default max pages</label>
+        <input id="scraper-max-pages" type="number" min="1" step="1">
+      </div>
+      <div class="field">
+        <label for="scraper-polite-delay">Polite delay (milliseconds)</label>
+        <input id="scraper-polite-delay" type="number" min="0" step="100">
+      </div>
+      <button id="scraper-save" class="primary" type="button">Save</button>
+      <div id="scraper-status"></div>
     </section>
   </main>
 
@@ -155,6 +179,7 @@
 (() => {
   const chunkCharsEl = document.getElementById("chunk-chars");
   const chunkOverlapEl = document.getElementById("chunk-overlap");
+  const topKEl = document.getElementById("top-k");
   const saveBtn = document.getElementById("rag-save");
   const statusEl = document.getElementById("rag-status");
 
@@ -165,6 +190,7 @@
       if (!res.ok || data.error) throw new Error(data.error || ("failed with status " + res.status));
       chunkCharsEl.value = data.chunkChars;
       chunkOverlapEl.value = data.chunkOverlap;
+      topKEl.value = data.topK;
     } catch (e) {
       statusEl.textContent = "Could not load settings: " + e.message;
     }
@@ -180,13 +206,15 @@
         body: JSON.stringify({
           chunkChars: parseInt(chunkCharsEl.value, 10),
           chunkOverlap: parseInt(chunkOverlapEl.value, 10),
+          topK: parseInt(topKEl.value, 10),
         }),
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || ("failed with status " + res.status));
       chunkCharsEl.value = data.chunkChars;
       chunkOverlapEl.value = data.chunkOverlap;
-      statusEl.textContent = "Saved. Applies to documents uploaded from now on.";
+      topKEl.value = data.topK;
+      statusEl.textContent = "Saved. Chunking applies to documents uploaded from now on; chunks retrieved applies to your next query.";
     } catch (e) {
       statusEl.textContent = "Could not save: " + e.message;
     } finally {
@@ -195,6 +223,53 @@
   });
 
   loadSettings();
+
+  const scraperMaxDepthEl = document.getElementById("scraper-max-depth");
+  const scraperMaxPagesEl = document.getElementById("scraper-max-pages");
+  const scraperPoliteDelayEl = document.getElementById("scraper-polite-delay");
+  const scraperSaveBtn = document.getElementById("scraper-save");
+  const scraperStatusEl = document.getElementById("scraper-status");
+
+  async function loadScraperSettings() {
+    try {
+      const res = await fetch("/api/scraper/settings");
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || ("failed with status " + res.status));
+      scraperMaxDepthEl.value = data.maxDepth;
+      scraperMaxPagesEl.value = data.maxPages;
+      scraperPoliteDelayEl.value = data.politeDelayMillis;
+    } catch (e) {
+      scraperStatusEl.textContent = "Could not load settings: " + e.message;
+    }
+  }
+
+  scraperSaveBtn.addEventListener("click", async () => {
+    scraperSaveBtn.disabled = true;
+    scraperStatusEl.textContent = "Saving...";
+    try {
+      const res = await fetch("/api/scraper/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          maxDepth: parseInt(scraperMaxDepthEl.value, 10),
+          maxPages: parseInt(scraperMaxPagesEl.value, 10),
+          politeDelayMillis: parseInt(scraperPoliteDelayEl.value, 10),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || ("failed with status " + res.status));
+      scraperMaxDepthEl.value = data.maxDepth;
+      scraperMaxPagesEl.value = data.maxPages;
+      scraperPoliteDelayEl.value = data.politeDelayMillis;
+      scraperStatusEl.textContent = "Saved. Applies to crawls started from now on.";
+    } catch (e) {
+      scraperStatusEl.textContent = "Could not save: " + e.message;
+    } finally {
+      scraperSaveBtn.disabled = false;
+    }
+  });
+
+  loadScraperSettings();
 })();
 </script>
 </body>

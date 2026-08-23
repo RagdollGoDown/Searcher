@@ -17,6 +17,7 @@ import (
 
 	"searcher/llm"
 	"searcher/query"
+	"searcher/scraper"
 	"searcher/source"
 	"searcher/store"
 )
@@ -97,6 +98,13 @@ type Server struct {
 	// Source interface used for chat) to serve the document management
 	// page. nil if RAG document management isn't enabled.
 	rag *source.RAGSource
+	// scraper runs website crawls, ingesting crawled pages into rag's
+	// backing store. It isn't a Source itself (chat-time retrieval already
+	// goes through rag once pages are ingested) so, like rag's
+	// non-Source-interface methods, it's used directly to serve the
+	// scraper management endpoints. nil if the scraper feature isn't
+	// enabled.
+	scraper *scraper.Crawler
 	// store persists chat conversations. nil if conversation persistence
 	// isn't enabled, in which case chats are never saved (today's
 	// behavior). Conversations aren't a Source (they're not a retrievable
@@ -109,11 +117,12 @@ type Server struct {
 // Source it queries; a chat request selects among them by name. rag, if
 // non-nil, is additionally used to serve the /api/rag/documents management
 // endpoints; it's typically also present in sources so it can be toggled
-// on for chat like any other Source. convStore, if non-nil, enables saving
+// on for chat like any other Source. sc, if non-nil, serves the
+// /api/scraper management endpoints. convStore, if non-nil, enables saving
 // and retrieving past conversations; it's typically the same store.Store
 // backing rag.
-func NewServer(client llm.Client, sources map[string]source.Source, rag *source.RAGSource, convStore *store.Store) *Server {
-	return &Server{client: client, sources: sources, rag: rag, store: convStore}
+func NewServer(client llm.Client, sources map[string]source.Source, rag *source.RAGSource, sc *scraper.Crawler, convStore *store.Store) *Server {
+	return &Server{client: client, sources: sources, rag: rag, scraper: sc, store: convStore}
 }
 
 // Handler returns the HTTP handler for the chat UI and API.
@@ -131,8 +140,17 @@ func (s *Server) Handler() (http.Handler, error) {
 		mux.HandleFunc("GET /api/rag/documents", s.handleListDocuments)
 		mux.HandleFunc("POST /api/rag/documents", s.handleUploadDocument)
 		mux.HandleFunc("DELETE /api/rag/documents/{id}", s.handleDeleteDocument)
+		mux.HandleFunc("DELETE /api/rag/documents/by-domain/{domain}", s.handleDeleteDocumentsByDomain)
 		mux.HandleFunc("GET /api/rag/settings", s.handleGetRAGSettings)
 		mux.HandleFunc("PUT /api/rag/settings", s.handlePutRAGSettings)
+	}
+	if s.scraper != nil {
+		mux.HandleFunc("POST /api/scraper/jobs", s.handleStartCrawl)
+		mux.HandleFunc("GET /api/scraper/jobs", s.handleListCrawlJobs)
+		mux.HandleFunc("GET /api/scraper/jobs/{id}", s.handleGetCrawlJob)
+		mux.HandleFunc("DELETE /api/scraper/jobs/{id}", s.handleCancelOrDeleteCrawlJob)
+		mux.HandleFunc("GET /api/scraper/settings", s.handleGetScraperSettings)
+		mux.HandleFunc("PUT /api/scraper/settings", s.handlePutScraperSettings)
 	}
 	if s.store != nil {
 		mux.HandleFunc("GET /api/conversations", s.handleListConversations)
@@ -296,6 +314,7 @@ type ragDocumentInfo struct {
 	ID         int64  `json:"id"`
 	Name       string `json:"name"`
 	MimeType   string `json:"mimeType"`
+	SourceURL  string `json:"sourceUrl,omitempty"`
 	AddedAt    string `json:"addedAt"`
 	ChunkCount int    `json:"chunkCount"`
 }
@@ -320,6 +339,7 @@ func (s *Server) handleListDocuments(w http.ResponseWriter, r *http.Request) {
 			ID:         d.ID,
 			Name:       d.Name,
 			MimeType:   d.MimeType,
+			SourceURL:  d.SourceURL,
 			AddedAt:    d.AddedAt.Format(time.RFC3339),
 			ChunkCount: d.ChunkCount,
 		}
@@ -377,21 +397,41 @@ func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ragSettingsBody is the RAG chunking settings, as sent to and from the
-// frontend. Changing them only affects documents ingested afterward.
+// handleDeleteDocumentsByDomain removes every document whose source URL's
+// host matches the given domain (e.g. deleting every page ingested from a
+// particular crawl target in one action).
+func (s *Server) handleDeleteDocumentsByDomain(w http.ResponseWriter, r *http.Request) {
+	domain := r.PathValue("domain")
+	if domain == "" {
+		http.Error(w, "domain is required", http.StatusBadRequest)
+		return
+	}
+
+	deleted, err := s.rag.DeleteDocumentsByDomain(r.Context(), domain)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"deleted": deleted})
+}
+
+// ragSettingsBody is RAGSource's settings, as sent to and from the
+// frontend. ChunkChars/ChunkOverlap only affect documents ingested
+// afterward; TopK affects queries from now on.
 type ragSettingsBody struct {
 	ChunkChars   int    `json:"chunkChars"`
 	ChunkOverlap int    `json:"chunkOverlap"`
+	TopK         int    `json:"topK"`
 	Error        string `json:"error,omitempty"`
 }
 
 func (s *Server) handleGetRAGSettings(w http.ResponseWriter, r *http.Request) {
-	cs, err := s.rag.GetChunkSettings(r.Context())
+	cs, err := s.rag.GetSettings(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ragSettingsBody{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, ragSettingsBody{ChunkChars: cs.ChunkChars, ChunkOverlap: cs.ChunkOverlap})
+	writeJSON(w, http.StatusOK, ragSettingsBody{ChunkChars: cs.ChunkChars, ChunkOverlap: cs.ChunkOverlap, TopK: cs.TopK})
 }
 
 func (s *Server) handlePutRAGSettings(w http.ResponseWriter, r *http.Request) {
@@ -401,12 +441,164 @@ func (s *Server) handlePutRAGSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cs := source.ChunkSettings{ChunkChars: req.ChunkChars, ChunkOverlap: req.ChunkOverlap}
-	if err := s.rag.SetChunkSettings(r.Context(), cs); err != nil {
+	cs := source.Settings{ChunkChars: req.ChunkChars, ChunkOverlap: req.ChunkOverlap, TopK: req.TopK}
+	if err := s.rag.SetSettings(r.Context(), cs); err != nil {
 		writeJSON(w, http.StatusBadRequest, ragSettingsBody{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, ragSettingsBody{ChunkChars: cs.ChunkChars, ChunkOverlap: cs.ChunkOverlap})
+	writeJSON(w, http.StatusOK, ragSettingsBody{ChunkChars: cs.ChunkChars, ChunkOverlap: cs.ChunkOverlap, TopK: cs.TopK})
+}
+
+// crawlJobInfo is a crawl job's parameters and progress, as sent to the
+// frontend.
+type crawlJobInfo struct {
+	ID             int64  `json:"id"`
+	RootURL        string `json:"rootUrl"`
+	MaxDepth       int    `json:"maxDepth"`
+	MaxPages       int    `json:"maxPages"`
+	SameDomainOnly bool   `json:"sameDomainOnly"`
+	Status         string `json:"status"`
+	PagesCrawled   int    `json:"pagesCrawled"`
+	PagesFailed    int    `json:"pagesFailed"`
+	ErrorMessage   string `json:"errorMessage,omitempty"`
+	CreatedAt      string `json:"createdAt"`
+	UpdatedAt      string `json:"updatedAt"`
+}
+
+func crawlJobInfoFrom(j store.CrawlJob) crawlJobInfo {
+	return crawlJobInfo{
+		ID:             j.ID,
+		RootURL:        j.RootURL,
+		MaxDepth:       j.MaxDepth,
+		MaxPages:       j.MaxPages,
+		SameDomainOnly: j.SameDomainOnly,
+		Status:         string(j.Status),
+		PagesCrawled:   j.PagesCrawled,
+		PagesFailed:    j.PagesFailed,
+		ErrorMessage:   j.ErrorMessage,
+		CreatedAt:      j.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:      j.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+// startCrawlRequest is the body of a POST /api/scraper/jobs request. A
+// zero MaxDepth/MaxPages falls back to the configured scraper settings.
+type startCrawlRequest struct {
+	RootURL        string `json:"rootUrl"`
+	MaxDepth       int    `json:"maxDepth"`
+	MaxPages       int    `json:"maxPages"`
+	SameDomainOnly bool   `json:"sameDomainOnly"`
+}
+
+func (s *Server) handleStartCrawl(w http.ResponseWriter, r *http.Request) {
+	var req startCrawlRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.RootURL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "rootUrl is required"})
+		return
+	}
+
+	params := scraper.Params{
+		RootURL:        req.RootURL,
+		MaxDepth:       req.MaxDepth,
+		MaxPages:       req.MaxPages,
+		SameDomainOnly: req.SameDomainOnly,
+	}
+	id, err := s.scraper.StartCrawl(r.Context(), params)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]int64{"id": id})
+}
+
+func (s *Server) handleListCrawlJobs(w http.ResponseWriter, r *http.Request) {
+	jobs, err := s.store.ListCrawlJobs(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	infos := make([]crawlJobInfo, len(jobs))
+	for i, j := range jobs {
+		infos[i] = crawlJobInfoFrom(j)
+	}
+	writeJSON(w, http.StatusOK, map[string][]crawlJobInfo{"jobs": infos})
+}
+
+func (s *Server) handleGetCrawlJob(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid job id", http.StatusBadRequest)
+		return
+	}
+
+	job, err := s.store.GetCrawlJob(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, crawlJobInfoFrom(job))
+}
+
+// handleCancelOrDeleteCrawlJob cancels the job if it's still running in
+// this process, or deletes its row otherwise. One endpoint covers both,
+// since from the frontend's perspective "stop this job" and "remove this
+// finished job" are the same action on the same button.
+func (s *Server) handleCancelOrDeleteCrawlJob(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid job id", http.StatusBadRequest)
+		return
+	}
+
+	if s.scraper.CancelCrawl(id) {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+
+	if err := s.store.DeleteCrawlJob(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// scraperSettingsBody is the crawler's default settings, as sent to and
+// from the frontend.
+type scraperSettingsBody struct {
+	MaxDepth          int    `json:"maxDepth"`
+	MaxPages          int    `json:"maxPages"`
+	PoliteDelayMillis int    `json:"politeDelayMillis"`
+	Error             string `json:"error,omitempty"`
+}
+
+func (s *Server) handleGetScraperSettings(w http.ResponseWriter, r *http.Request) {
+	cs, err := s.scraper.GetSettings(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, scraperSettingsBody{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, scraperSettingsBody{MaxDepth: cs.MaxDepth, MaxPages: cs.MaxPages, PoliteDelayMillis: cs.PoliteDelayMillis})
+}
+
+func (s *Server) handlePutScraperSettings(w http.ResponseWriter, r *http.Request) {
+	var req scraperSettingsBody
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, scraperSettingsBody{Error: "invalid request body"})
+		return
+	}
+
+	cs := scraper.Settings{MaxDepth: req.MaxDepth, MaxPages: req.MaxPages, PoliteDelayMillis: req.PoliteDelayMillis}
+	if err := s.scraper.SetSettings(r.Context(), cs); err != nil {
+		writeJSON(w, http.StatusBadRequest, scraperSettingsBody{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, scraperSettingsBody{MaxDepth: cs.MaxDepth, MaxPages: cs.MaxPages, PoliteDelayMillis: cs.PoliteDelayMillis})
 }
 
 // conversationInfo is a saved conversation's metadata, as sent to the

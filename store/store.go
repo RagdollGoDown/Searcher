@@ -21,6 +21,22 @@ CREATE TABLE IF NOT EXISTS documents (
 	added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS crawl_jobs (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	root_url TEXT NOT NULL,
+	max_depth INTEGER NOT NULL,
+	max_pages INTEGER NOT NULL,
+	same_domain_only INTEGER NOT NULL DEFAULT 1,
+	status TEXT NOT NULL DEFAULT 'pending',
+	pages_crawled INTEGER NOT NULL DEFAULT 0,
+	pages_failed INTEGER NOT NULL DEFAULT 0,
+	error_message TEXT NOT NULL DEFAULT '',
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_crawl_jobs_status ON crawl_jobs(status);
+
 CREATE TABLE IF NOT EXISTS chunks (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -83,7 +99,53 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("store: creating schema: %w", err)
 	}
 
-	return &Store{db: db, path: path}, nil
+	s := &Store{db: db, path: path}
+	if err := s.migrate(); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	return s, nil
+}
+
+// migrate applies schema changes CREATE TABLE IF NOT EXISTS can't express —
+// currently just adding columns to tables that predate them. Each step is
+// guarded by hasColumn so it's safe to call every time Open runs. If this
+// list grows past a couple of entries, it's worth graduating to a versioned
+// migrations table instead.
+func (s *Store) migrate() error {
+	ok, err := s.hasColumn("documents", "source_url")
+	if err != nil {
+		return err
+	}
+	if !ok {
+		if _, err := s.db.Exec(`ALTER TABLE documents ADD COLUMN source_url TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("store: adding documents.source_url: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) hasColumn(table, column string) (bool, error) {
+	rows, err := s.db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return false, fmt.Errorf("store: checking %s schema: %w", table, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, fmt.Errorf("store: scanning %s schema: %w", table, err)
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // Close closes the underlying database.

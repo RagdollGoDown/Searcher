@@ -21,7 +21,8 @@
       "PowerShell(ollama pull nomic-embed-text)",
       "PowerShell(Invoke-RestMethod -Uri \"http://localhost:8080/api/rag/documents\" -Method Get)",
       "PowerShell(& \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" run \"C:\\\\Users\\\\Cadet\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Cadet-Documents-GenericCodingProjects-Searcher\\\\16356924-e1e0-4b97-95df-3a3c86bf2e48\\\\scratchpad\\\\inspect_chunk.go\" 2>&1)",
-      "PowerShell(& \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" build ./store/... 2>&1)"
+      "PowerShell(& \"C:\\\\Program Files\\\\Go\\\\bin\\\\go.exe\" build ./store/... 2>&1)",
+      "Bash(go version *)"
     ]
   }
 }
