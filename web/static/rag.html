@@ -155,6 +155,32 @@
   .doc-delete:hover {
     border-color: var(--danger);
   }
+  .domain-group {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  .domain-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    cursor: pointer;
+  }
+  .domain-summary::-webkit-details-marker { color: var(--muted); }
+  .domain-summary .doc-info { min-width: 0; }
+  .domain-group .doc-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 16px 12px;
+  }
+  .domain-group .doc-row {
+    border-color: var(--border);
+    background: var(--bg);
+  }
   #empty-state {
     font-size: 13px;
     color: var(--muted);
@@ -182,8 +208,6 @@
       <div id="upload-status"></div>
     </div>
     <div id="storage-summary"></div>
-    <div id="domain-groups-label" class="doc-meta" style="display:none">Delete all documents from a domain</div>
-    <div id="domain-groups"></div>
     <div id="documents"></div>
     <div id="empty-state" style="display:none">No documents uploaded yet.</div>
   </main>
@@ -196,8 +220,6 @@
   const documentsEl = document.getElementById("documents");
   const emptyStateEl = document.getElementById("empty-state");
   const storageSummaryEl = document.getElementById("storage-summary");
-  const domainGroupsLabelEl = document.getElementById("domain-groups-label");
-  const domainGroupsEl = document.getElementById("domain-groups");
 
   function isPDF(file) {
     return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
@@ -221,6 +243,108 @@
     }
   }
 
+  function docHost(doc) {
+    if (!doc.sourceUrl) return null;
+    try {
+      return new URL(doc.sourceUrl).hostname;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // buildDocRow renders a single document as a .doc-row: name, chunk count,
+  // source link (if scraped), and a delete button.
+  function buildDocRow(doc) {
+    const row = document.createElement("div");
+    row.className = "doc-row";
+
+    const info = document.createElement("div");
+    info.className = "doc-info";
+
+    const name = document.createElement("div");
+    name.className = "doc-name";
+    name.textContent = doc.name;
+    info.appendChild(name);
+
+    const meta = document.createElement("div");
+    meta.className = "doc-meta";
+    meta.textContent = doc.chunkCount + " chunk" + (doc.chunkCount === 1 ? "" : "s") + " — added " + formatDate(doc.addedAt);
+    info.appendChild(meta);
+
+    if (doc.sourceUrl) {
+      const sourceEl = document.createElement("div");
+      sourceEl.className = "doc-source";
+      const link = document.createElement("a");
+      link.href = doc.sourceUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = doc.sourceUrl;
+      sourceEl.appendChild(link);
+      info.appendChild(sourceEl);
+    }
+
+    row.appendChild(info);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "doc-delete";
+    deleteBtn.type = "button";
+    deleteBtn.textContent = "Delete";
+    deleteBtn.addEventListener("click", () => deleteDocument(doc.id));
+    row.appendChild(deleteBtn);
+
+    return row;
+  }
+
+  // buildDomainGroup renders every scraped page from one domain as a
+  // collapsible <details>, collapsed by default, so a large crawl doesn't
+  // flood the page with one row per page. The summary shows the domain and
+  // page count plus a "Delete all" button; expanding it reveals the
+  // individual doc-rows.
+  function buildDomainGroup(domain, docs) {
+    const details = document.createElement("details");
+    details.className = "domain-group";
+
+    const summary = document.createElement("summary");
+    summary.className = "domain-summary";
+
+    const info = document.createElement("div");
+    info.className = "doc-info";
+
+    const name = document.createElement("div");
+    name.className = "doc-name";
+    name.textContent = domain;
+    info.appendChild(name);
+
+    const meta = document.createElement("div");
+    meta.className = "doc-meta";
+    meta.textContent = docs.length + " page" + (docs.length === 1 ? "" : "s");
+    info.appendChild(meta);
+
+    summary.appendChild(info);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "doc-delete";
+    deleteBtn.type = "button";
+    deleteBtn.textContent = "Delete all";
+    deleteBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      deleteDomain(domain);
+    });
+    summary.appendChild(deleteBtn);
+
+    details.appendChild(summary);
+
+    const rows = document.createElement("div");
+    rows.className = "doc-rows";
+    for (const doc of docs) {
+      rows.appendChild(buildDocRow(doc));
+    }
+    details.appendChild(rows);
+
+    return details;
+  }
+
   async function loadDocuments() {
     const res = await fetch("/api/rag/documents");
     const data = await res.json();
@@ -232,102 +356,36 @@
     documentsEl.innerHTML = "";
     emptyStateEl.style.display = docs.length === 0 ? "block" : "none";
 
-    renderDomainGroups(docs);
-
+    // Group scraped docs by domain so a large crawl collapses into one row
+    // per domain instead of one per page. A domain with only a single page
+    // isn't worth collapsing, so it renders as a plain doc-row. Order
+    // follows first appearance, matching the API's newest-first order.
+    const domainDocs = new Map();
     for (const doc of docs) {
-      const row = document.createElement("div");
-      row.className = "doc-row";
+      const host = docHost(doc);
+      if (host === null) continue;
+      if (!domainDocs.has(host)) domainDocs.set(host, []);
+      domainDocs.get(host).push(doc);
+    }
 
-      const info = document.createElement("div");
-      info.className = "doc-info";
+    const renderedDomains = new Set();
+    for (const doc of docs) {
+      const host = docHost(doc);
+      const groupDocs = host === null ? null : domainDocs.get(host);
 
-      const name = document.createElement("div");
-      name.className = "doc-name";
-      name.textContent = doc.name;
-      info.appendChild(name);
-
-      const meta = document.createElement("div");
-      meta.className = "doc-meta";
-      meta.textContent = doc.chunkCount + " chunk" + (doc.chunkCount === 1 ? "" : "s") + " — added " + formatDate(doc.addedAt);
-      info.appendChild(meta);
-
-      if (doc.sourceUrl) {
-        const sourceEl = document.createElement("div");
-        sourceEl.className = "doc-source";
-        const link = document.createElement("a");
-        link.href = doc.sourceUrl;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        link.textContent = doc.sourceUrl;
-        sourceEl.appendChild(link);
-        info.appendChild(sourceEl);
+      if (groupDocs === null || groupDocs.length === 1) {
+        documentsEl.appendChild(buildDocRow(doc));
+        continue;
       }
-
-      row.appendChild(info);
-
-      const deleteBtn = document.createElement("button");
-      deleteBtn.className = "doc-delete";
-      deleteBtn.type = "button";
-      deleteBtn.textContent = "Delete";
-      deleteBtn.addEventListener("click", () => deleteDocument(doc.id));
-      row.appendChild(deleteBtn);
-
-      documentsEl.appendChild(row);
+      if (renderedDomains.has(host)) continue;
+      renderedDomains.add(host);
+      documentsEl.appendChild(buildDomainGroup(host, groupDocs));
     }
   }
 
   async function deleteDocument(id) {
     await fetch("/api/rag/documents/" + id, { method: "DELETE" });
     await loadDocuments();
-  }
-
-  // renderDomainGroups shows one row per distinct domain found among docs'
-  // sourceUrl (i.e. scraped, not uploaded, documents), each with a count
-  // and a button to delete every document from that domain in one action.
-  function renderDomainGroups(docs) {
-    const counts = new Map();
-    for (const doc of docs) {
-      if (!doc.sourceUrl) continue;
-      let host;
-      try {
-        host = new URL(doc.sourceUrl).hostname;
-      } catch (e) {
-        continue;
-      }
-      counts.set(host, (counts.get(host) || 0) + 1);
-    }
-
-    domainGroupsEl.innerHTML = "";
-    domainGroupsLabelEl.style.display = counts.size === 0 ? "none" : "block";
-
-    for (const [domain, count] of counts) {
-      const row = document.createElement("div");
-      row.className = "doc-row";
-
-      const info = document.createElement("div");
-      info.className = "doc-info";
-
-      const name = document.createElement("div");
-      name.className = "doc-name";
-      name.textContent = domain;
-      info.appendChild(name);
-
-      const meta = document.createElement("div");
-      meta.className = "doc-meta";
-      meta.textContent = count + " document" + (count === 1 ? "" : "s");
-      info.appendChild(meta);
-
-      row.appendChild(info);
-
-      const deleteBtn = document.createElement("button");
-      deleteBtn.className = "doc-delete";
-      deleteBtn.type = "button";
-      deleteBtn.textContent = "Delete all";
-      deleteBtn.addEventListener("click", () => deleteDomain(domain));
-      row.appendChild(deleteBtn);
-
-      domainGroupsEl.appendChild(row);
-    }
   }
 
   async function deleteDomain(domain) {

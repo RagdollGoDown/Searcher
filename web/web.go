@@ -31,7 +31,7 @@ const summarizerSystemPrompt = "You are a research assistant. You will be given 
 	"and a set of article extracts related to it. Write a concise summary, in your own words, " +
 	"that answers the query using only information from the extracts. If the extracts don't " +
 	"contain enough information, say so. You shouldn't write more than what is required to answer the query." +
-	"You shouldn't make up information. Use markdown formatting for your responses."
+	"You shouldn't make up information. Use markdown formatting for your responses. Answer in the same language as the query."
 
 // conversationTitleMaxChars caps how much of a conversation's first
 // message is used as its title.
@@ -77,12 +77,22 @@ type chatResponseBody struct {
 	// echoing the request's ConversationID, or a newly created one if the
 	// request's was 0. Omitted if conversation persistence isn't enabled.
 	ConversationID int64 `json:"conversationId,omitempty"`
+	// LLMDurationMs is how long the final llm.Client.Chat call took to
+	// generate Reply, regardless of whether it went through
+	// searchAndSummarize or chat.
+	LLMDurationMs int64 `json:"llmDurationMs,omitempty"`
+	// TotalDurationMs is the full handleChat request time: source
+	// fetches (if any), the LLM call, and conversation persistence.
+	// Always >= LLMDurationMs.
+	TotalDurationMs int64 `json:"totalDurationMs,omitempty"`
 }
 
 // sourceResults is one queried Source's results, as sent to the frontend.
 type sourceResults struct {
 	Source  string             `json:"source"`
 	Results []sourceResultInfo `json:"results"`
+	// DurationMs is how long this Source's Fetch call took.
+	DurationMs int64 `json:"durationMs"`
 }
 
 type sourceResultInfo struct {
@@ -182,6 +192,7 @@ func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
+	requestStart := time.Now()
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -201,11 +212,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	var reply string
 	var grouped []sourceResults
+	var llmDuration time.Duration
 	var err error
 	if len(req.Sources) > 0 || len(req.Files) > 0 {
-		reply, grouped, err = s.searchAndSummarize(r.Context(), userText, req.Sources, req.Files)
+		reply, grouped, llmDuration, err = s.searchAndSummarize(r.Context(), userText, req.Sources, req.Files)
 	} else {
-		reply, err = s.chat(r.Context(), req.Messages)
+		reply, llmDuration, err = s.chat(r.Context(), req.Messages)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, chatResponseBody{Error: err.Error()})
@@ -236,7 +248,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, chatResponseBody{Reply: reply, Sources: grouped, ConversationID: conversationID})
+	writeJSON(w, http.StatusOK, chatResponseBody{
+		Reply:           reply,
+		Sources:         grouped,
+		ConversationID:  conversationID,
+		LLMDurationMs:   llmDuration.Milliseconds(),
+		TotalDurationMs: time.Since(requestStart).Milliseconds(),
+	})
 }
 
 // conversationTitle derives a conversation's title from its first message:
@@ -256,8 +274,9 @@ func conversationTitle(firstMessage string) string {
 // source and asks the LLM for a single summary answering it. files are made
 // available to sources (e.g. "Local Files") as query attachments. It
 // returns the summary along with each source's raw results, grouped by
-// source, so the caller can show the user what was actually retrieved.
-func (s *Server) searchAndSummarize(ctx context.Context, queryText string, sourceNames []string, files []fileAttachment) (string, []sourceResults, error) {
+// source, so the caller can show the user what was actually retrieved, and
+// how long the summarizing LLM call took.
+func (s *Server) searchAndSummarize(ctx context.Context, queryText string, sourceNames []string, files []fileAttachment) (string, []sourceResults, time.Duration, error) {
 	attachments := make([]query.Attachment, len(files))
 	for i, f := range files {
 		attachments[i] = query.Attachment{Name: f.Name, Content: f.Content, Encoding: f.Encoding, MimeType: f.MimeType}
@@ -269,11 +288,13 @@ func (s *Server) searchAndSummarize(ctx context.Context, queryText string, sourc
 	for _, name := range sourceNames {
 		src, ok := s.sources[name]
 		if !ok {
-			return "", nil, fmt.Errorf("unknown source %q", name)
+			return "", nil, 0, fmt.Errorf("unknown source %q", name)
 		}
+		fetchStart := time.Now()
 		r, err := src.Fetch(*q)
+		fetchDuration := time.Since(fetchStart)
 		if err != nil {
-			return "", nil, fmt.Errorf("fetching from %s: %w", name, err)
+			return "", nil, 0, fmt.Errorf("fetching from %s: %w", name, err)
 		}
 		results = append(results, r...)
 
@@ -281,7 +302,7 @@ func (s *Server) searchAndSummarize(ctx context.Context, queryText string, sourc
 		for i, res := range r {
 			infos[i] = sourceResultInfo{Title: res.Title, Extract: res.Extract}
 		}
-		grouped = append(grouped, sourceResults{Source: name, Results: infos})
+		grouped = append(grouped, sourceResults{Source: name, Results: infos, DurationMs: fetchDuration.Milliseconds()})
 	}
 
 	var b strings.Builder
@@ -294,19 +315,24 @@ func (s *Server) searchAndSummarize(ctx context.Context, queryText string, sourc
 		{Role: llm.RoleSystem, Content: summarizerSystemPrompt},
 		{Role: llm.RoleUser, Content: b.String()},
 	}
+	llmStart := time.Now()
 	reply, err := s.client.Chat(ctx, messages)
+	llmDuration := time.Since(llmStart)
 	if err != nil {
-		return "", nil, err
+		return "", nil, 0, err
 	}
-	return reply, grouped, nil
+	return reply, grouped, llmDuration, nil
 }
 
-// chat relays the conversation directly to the LLM.
-func (s *Server) chat(ctx context.Context, history []llm.Message) (string, error) {
+// chat relays the conversation directly to the LLM, also returning how long
+// the Chat call took.
+func (s *Server) chat(ctx context.Context, history []llm.Message) (string, time.Duration, error) {
 	messages := make([]llm.Message, 0, len(history)+1)
 	messages = append(messages, llm.Message{Role: llm.RoleSystem, Content: chatSystemPrompt})
 	messages = append(messages, history...)
-	return s.client.Chat(ctx, messages)
+	start := time.Now()
+	reply, err := s.client.Chat(ctx, messages)
+	return reply, time.Since(start), err
 }
 
 // ragDocumentInfo is a stored document's metadata as sent to the frontend.

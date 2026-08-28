@@ -435,6 +435,11 @@
     color: var(--muted);
     margin-top: 8px;
   }
+  .llm-duration {
+    align-self: flex-start;
+    font-size: 11px;
+    color: var(--muted);
+  }
 </style>
 </head>
 <body>
@@ -642,7 +647,8 @@
 
       const summary = document.createElement("summary");
       const count = group.results.length;
-      summary.textContent = group.source + " (" + count + (count === 1 ? " result" : " results") + ")";
+      summary.textContent = group.source + " (" + count + (count === 1 ? " result" : " results") +
+        (typeof group.durationMs === "number" ? ", " + group.durationMs + "ms" : "") + ")";
       details.appendChild(summary);
 
       if (count === 0) {
@@ -797,6 +803,19 @@
       const sourcesPanel = renderSourcesPanel(data.sources);
       if (sourcesPanel) {
         pending.insertAdjacentElement("afterend", sourcesPanel);
+      }
+
+      const durationParts = [];
+      if (typeof data.llmDurationMs === "number") durationParts.push("LLM: " + data.llmDurationMs + "ms");
+      if (typeof data.totalDurationMs === "number") durationParts.push("Total: " + data.totalDurationMs + "ms");
+      if (durationParts.length > 0) {
+        const duration = document.createElement("div");
+        duration.className = "llm-duration";
+        duration.textContent = durationParts.join(" · ");
+        (sourcesPanel || pending).insertAdjacentElement("afterend", duration);
+      }
+
+      if (sourcesPanel || durationParts.length > 0) {
         chatEl.scrollTop = chatEl.scrollHeight;
       }
     } catch (e) {
