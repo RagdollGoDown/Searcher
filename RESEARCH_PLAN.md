@@ -13,10 +13,16 @@ scraper, and job-status patterns already in the codebase.
 
 Phase 0 decisions locked (2026-09-13). Phase 1 items 1-3 done (2026-09-13):
 `research_jobs`/`research_citations` schema + `store/research_jobs.go` CRUD.
-Phase 3 item 7 done (2026-09-14): new `research/` package, `round.go` —
-`ParseRoundReply`, `DedupeQueries`, `BuildRoundPrompt`, per 0.2's protocol.
-Phase 3 items 8-13 (condensed history builder, per-round fetch, loop
-control, synthesis, job wiring, startup recovery) and Phase 2 next.
+Phase 2 items 4-5 done (2026-09-14): `llm/anthropic.go` (`AnthropicClient`,
+raw `net/http` against the Messages API — the official SDK was tried
+first but dropped after measuring +6.2MB/+36% binary size from transitive
+deps this app never uses; matches `ollama.go`'s existing raw-HTTP style) +
+`research/settings.go` (default backend/model settings on the new
+`Researcher` struct, `NewClient` factory choosing Ollama vs. Anthropic). Phase 3 item 7 done (2026-09-14): new
+`research/round.go` — `ParseRoundReply`, `DedupeQueries`,
+`BuildRoundPrompt`, per 0.2's protocol. Phase 3 items 8-13 (condensed
+history builder, per-round fetch, loop control, synthesis, job wiring,
+startup recovery) next.
 
 ## Phase 0 — Decisions (locked)
 
@@ -133,7 +139,13 @@ handlers can be stubbed earlier against interfaces)
     is `done`).
 18. `DELETE /api/research/jobs/{id}` — cancel/delete, mirrors
     `handleCancelOrDeleteCrawlJob` in `web/web.go`.
-19. Wire routes into `Server.Handler()`.
+19. `GET`/`PUT /api/research/settings` — default backend/model, mirrors
+    `handleGetRAGSettings`/`handlePutRAGSettings` and
+    `handleGetScraperSettings`/`handlePutScraperSettings`. Backs
+    `Researcher.GetSettings`/`SetSettings` (`research/settings.go`, done in
+    Phase 2 item 5) — added here since it was missed when Phase 4 was
+    first drafted, even though RAG and the scraper both got one.
+20. Wire routes into `Server.Handler()`.
 
 ## Phase 5 — Frontend (depends on Phase 4)
 
