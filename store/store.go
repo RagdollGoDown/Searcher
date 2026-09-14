@@ -68,6 +68,34 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
+
+CREATE TABLE IF NOT EXISTS research_jobs (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	query TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'pending',
+	round_count INTEGER NOT NULL DEFAULT 0,
+	sources TEXT NOT NULL DEFAULT '',
+	backend TEXT NOT NULL DEFAULT '',
+	model TEXT NOT NULL DEFAULT '',
+	error_message TEXT NOT NULL DEFAULT '',
+	report TEXT NOT NULL DEFAULT '',
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_jobs_status ON research_jobs(status);
+
+CREATE TABLE IF NOT EXISTS research_citations (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	job_id INTEGER NOT NULL REFERENCES research_jobs(id) ON DELETE CASCADE,
+	number INTEGER NOT NULL,
+	source_name TEXT NOT NULL,
+	title TEXT NOT NULL,
+	extract TEXT NOT NULL,
+	url TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_citations_job_id ON research_citations(job_id);
 `
 
 // Store is Searcher's local database: document metadata and their chunk
