@@ -21,6 +21,12 @@ A lightweight, self-hostable LLM chat app with tool use (e.g. Wikipedia search, 
 - Settings changes (e.g. RAG chunk size/overlap) apply prospectively only — changing them never rechunks or re-embeds already-ingested documents.
 - `Icon()` returns raw inline SVG rendered unsanitized in the UI — must only ever be trusted, developer-authored markup, never derived from user/source input.
 
+## Future work
+
+- A research/report-generation feature is being designed — see `RESEARCH_PLAN.md`
+  for the full task breakdown, phase dependencies, and locked design decisions.
+- The planned research/report-generation feature's iterative search loop uses a plain-text `SEARCH: <query>` / `DONE` convention (parsed by the loop's own Go code) rather than native tool-calling, specifically so the same loop works against any `llm.Client` backend, including ones without reliable tool-calling (e.g. `phi3:mini` via Ollama). Once an Anthropic-backed `llm.Client` exists, consider giving that backend real tool-calling for the search step instead — likely more reliable for that provider, at the cost of a backend-specific code path instead of one uniform loop.
+
 ## Known limitations
 
 - PDF text extraction (`extract.PDFText`, via `github.com/ledongthuc/pdf`) doesn't reliably resolve ligature glyphs (`fi`, `fl`, `ff`, `ffi`, `ffl`) through the font's `ToUnicode` CMap, producing garbled text (e.g. "conï¬dence" instead of "confidence") in PDFs that use them heavily — common in academic-style documents. Affects both `FilesSource` and `RAGSource` equally, since they share the same extraction path.
