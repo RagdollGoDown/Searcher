@@ -1,32 +1,75 @@
 # Searcher
 
-A lightweight, self-hostable LLM chat app with tool use (e.g. Wikipedia search, RAG over uploaded documents), designed to run on small consumer-level machines. Written in Go, using Ollama (`phi3:mini` for chat, `nomic-embed-text` for embeddings) as the local LLM backend.
+A lightweight, self-hostable LLM chat app with tool use (Wikipedia search, RAG over
+uploaded documents and crawled sites), targeting small consumer hardware. Written in
+Go, backed by a local Ollama server (`phi3:mini` for chat, `nomic-embed-text` for
+embeddings). Serves `localhost:8080`.
 
-## Structure
+## Packages
 
-- `main.go` — entry point; wires up the LLM client, embedder, RAG store, sources, and web server, then serves on `localhost:8080`.
-- `llm/` — `Client` interface for chat-completion backends (`Init`, `Chat`) and `Embedder` interface for embedding backends (`Init`, `Embed`); `llm.go` defines both interfaces plus the `Message` type. `ollama.go` implements both against a local Ollama server: `OllamaClient` (chat) and `OllamaEmbedder` (embeddings) share connection/startup logic via an embedded `ollamaServer` struct, since chat and embeddings are different models on the same server and not every use needs both.
-- `source/` — `Source` interface for pluggable tools/data sources (`Fetch`, `Icon`). `wikipedia.go` implements a real Wikipedia source; `fakeSource.go` is a stub for testing; `files.go` (`FilesSource`) turns browser-uploaded file attachments on the `Query` directly into `Result`s, truncating per-file and total content so attachments can't blow out the LLM's context window; `rag.go` (`RAGSource`) searches a persistent `store.Store` of previously uploaded documents by embedding the query and retrieving the most similar chunks (same truncation pattern as `FilesSource`). Unlike `FilesSource`, `RAGSource` also exposes document management (`Ingest`, `ListDocuments`, `DeleteDocument`, `StorageSizeBytes`) and per-source settings (`GetChunkSettings`/`SetChunkSettings`) consumed directly by `web`, not through the `Source` interface. Non-text formats (e.g. PDF) are decoded via `extract/` for both `FilesSource` and `RAGSource` (they share the same `resolveContent` helper).
-- `extract/` — turns the raw bytes of a non-text file format into plain text (e.g. `PDFText` for PDFs, via `github.com/ledongthuc/pdf`), for callers like `source.FilesSource`/`source.RAGSource` that need file content as text regardless of original format.
-- `query/` — shared `Query` type passed to sources, including any file attachments.
-- `store/` — Searcher's persistent, unified local database: a single SQLite file (pure-Go `modernc.org/sqlite`, no CGO) holding uploaded documents, their chunk embeddings, saved conversations, and arbitrary key-value settings. `store.go` opens the DB and creates the schema; `chunk.go` is the pure, parameterized text chunker (`ChunkText`); `chunks.go`/`documents.go` are CRUD for chunks/documents; `search.go` is brute-force cosine similarity search over chunk embeddings (`SearchChunks`), deliberately isolated in one function so swapping in an ANN index later is a contained change; `settings.go` is a generic `GetSetting`/`SetSetting` key-value store, meant to be reused by future per-source or interface settings, not just RAG's chunk size/overlap; `conversations.go` is CRUD for saved chat sessions (`conversations` table, one row per session) and their messages (`messages` table, one row per turn — normalized rather than one JSON blob per conversation, so a turn is durable the instant it's saved and so messages can later grow e.g. an `embedding` column the same way chunks did, enabling search over past conversations).
-- `web/` — HTTP server/handler wiring the LLM and sources into a chat UI, plus RAG document management and settings pages. `static/index.html` is the chat UI, including a conversation-history flyout panel (left-side header button) for switching between/deleting saved conversations; `static/rag.html` manages uploaded documents (upload, list with chunk counts, delete, total storage size); `static/settings.html` holds per-feature settings (currently RAG chunk size/overlap). The chat UI lets users upload files from the browser; their contents are sent to `/api/chat` as attachments and passed through to sources (e.g. "Local Files") via the `Query`. When a chat request names Sources, the response includes each source's raw retrieved results (title + extract) alongside the summarized reply, shown in the UI as a collapsible per-source dropdown under the assistant's message. Each `/api/chat` request carries a `conversationId` (0 meaning "start a new one, titled from this message"); the server persists only the newest user message and reply per turn — the frontend still sends the full message history for LLM context, unchanged from before conversation persistence existed. A page load always starts a blank conversation (never auto-resumes); past ones are reachable only via the history flyout, which lazily loads its list/messages from `/api/conversations`.
+- `llm/` — provider-agnostic `Client` (chat) and `Embedder` (embeddings) interfaces, with Ollama and Anthropic implementations.
+- `source/` — pluggable tools and data sources behind the `Source` interface (`Fetch` + `Icon`): Wikipedia, browser-uploaded attachments, and RAG over the document store.
+- `store/` — the single SQLite file holding everything persistent: documents, chunk embeddings, conversations, background job state, and key-value settings.
+- `scraper/` — crawls a site from a root URL and ingests pages into the RAG store, so crawled content is searchable through the existing document source with no separate retrieval path.
+- `research/` — the iterative search loop behind the report-generation feature. Not wired into `web/` yet.
+- `extract/` — decodes non-text formats (currently PDF) to plain text.
+- `query/` — the `Query` type passed to sources, including file attachments.
+- `web/` — HTTP server plus the chat, document, scraper, and settings UIs.
+- `main.go` — wires the above together.
 
-## Design notes
+Packages carry doc comments covering their own internals and file layout. Read those
+instead of duplicating them here.
 
-- Keep the LLM backend provider-agnostic behind the `llm.Client`/`llm.Embedder` interfaces — the goal is easy swapping of local models.
-- Sources are pluggable via the `source.Source` interface; adding a new tool means implementing `Fetch` + `Icon`. Management/settings capabilities beyond `Fetch`/`Icon` (as `RAGSource` has) are deliberately *not* generalized into the `Source` interface yet — there's only one example of a source needing them, and the right shape for a general "manageable source" interface isn't knowable from a single case. Generalize when a second source actually needs it.
-- Prioritize low resource usage and simple self-hosting — this targets small consumer hardware, not server-grade machines. This is why `store/` uses pure-Go SQLite (no CGO, no C toolchain, no Docker) and brute-force cosine similarity (no native/ANN vector index dependency) rather than heavier alternatives (Postgres+pgvector, `sqlite-vec`, a dedicated vector DB) — see chat history/commit context for the fuller tradeoff discussion if revisiting this.
-- `store/`'s `settings` table is intentionally a generic key-value store, not RAG-specific, since the goal is for other sources and general interface preferences to eventually have configurable settings too, all persisted in the same unified DB.
-- Settings changes (e.g. RAG chunk size/overlap) apply prospectively only — changing them never rechunks or re-embeds already-ingested documents.
-- `Icon()` returns raw inline SVG rendered unsanitized in the UI — must only ever be trusted, developer-authored markup, never derived from user/source input.
+## Design decisions
 
-## Future work
+- **Small hardware is the binding constraint.** No CGO, no Docker, no server-grade
+  dependencies. That is why `store/` uses pure-Go SQLite (`modernc.org/sqlite`) and
+  brute-force cosine similarity rather than Postgres+pgvector, `sqlite-vec`, or an ANN
+  index. Raise the tradeoff before reaching for anything heavier.
+- **Keep the LLM backend swappable.** Model-specific behavior belongs behind
+  `llm.Client`/`llm.Embedder`. The research loop's plain-text `SEARCH:` / `DONE`
+  protocol exists for this reason: it works on backends without reliable tool-calling.
+- **Don't generalize a source capability until a second source needs it.** `RAGSource`
+  has document-management and settings methods that `web` calls directly rather than
+  through `Source`. One example isn't enough to know the right shape for a general
+  interface.
+- **`store/`'s `settings` table is a generic key-value store**, not RAG-specific. Other
+  sources and UI preferences are meant to share it.
+- **Conversation messages are one row per turn, not a JSON blob per conversation.** A
+  turn is durable the moment it's saved, and messages can later grow an `embedding`
+  column the way chunks did.
+- **Settings changes apply prospectively.** Changing chunk size or overlap never
+  rechunks or re-embeds already-ingested documents.
+- **`Icon()` output is rendered unsanitized.** Trusted developer-authored SVG only,
+  never anything derived from user or source input.
 
-- A research/report-generation feature is being designed — see `RESEARCH_PLAN.md`
-  for the full task breakdown, phase dependencies, and locked design decisions.
-- The planned research/report-generation feature's iterative search loop uses a plain-text `SEARCH: <query>` / `DONE` convention (parsed by the loop's own Go code) rather than native tool-calling, specifically so the same loop works against any `llm.Client` backend, including ones without reliable tool-calling (e.g. `phi3:mini` via Ollama). Once an Anthropic-backed `llm.Client` exists, consider giving that backend real tool-calling for the search step instead — likely more reliable for that provider, at the cost of a backend-specific code path instead of one uniform loop.
+## Code style
+
+Simplicity is a requirement here, not a preference. This is a small app on small
+hardware and should stay readable by one person holding all of it in their head.
+
+- **Comments explain why, not what.** The existing ones do this well. The note on
+  `Source.Icon`, the one on `FilesSource`'s truncation limits, and the one in `main.go`
+  explaining why the scraper is deliberately absent from the sources map are the model
+  to follow. Each records a decision the code can't show on its own.
+- **Don't narrate the code.** No `// increment counter` above `counter++`, no
+  `// Step 1:` headers chopping up a short function, no doc comment that just restates
+  a field's name. Go's convention of opening a doc comment with the identifier is fine;
+  padding it to a sentence that adds nothing is not.
+- **Don't write comments about the edit.** Nothing saying "now handles X", "updated to
+  use Y", or "this used to do Z". Comments describe the code as it stands. Git holds
+  the history.
 
 ## Known limitations
 
-- PDF text extraction (`extract.PDFText`, via `github.com/ledongthuc/pdf`) doesn't reliably resolve ligature glyphs (`fi`, `fl`, `ff`, `ffi`, `ffl`) through the font's `ToUnicode` CMap, producing garbled text (e.g. "conï¬dence" instead of "confidence") in PDFs that use them heavily — common in academic-style documents. Affects both `FilesSource` and `RAGSource` equally, since they share the same extraction path.
+- `extract.PDFText` doesn't reliably resolve ligature glyphs (`fi`, `fl`, `ff`) through
+  the font's `ToUnicode` CMap, so PDFs that use them heavily come out garbled. Affects
+  every caller, since they share one extraction path.
+
+## Future work
+
+- Research/report generation is mid-build. `RESEARCH_PLAN.md` has the task breakdown,
+  phase dependencies, and locked design decisions.
+- Once the Anthropic backend is proven, consider giving it real tool-calling for the
+  search step instead of the plain-text protocol. Likely more reliable there, at the
+  cost of a backend-specific code path.
