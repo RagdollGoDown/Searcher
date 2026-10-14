@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"searcher/extract"
-	"searcher/query"
+	"github.com/RagdollGoDown/Searcher/extract"
+	"github.com/RagdollGoDown/Searcher/query"
 )
 
 const filesDefaultMaxFileChars = 20000

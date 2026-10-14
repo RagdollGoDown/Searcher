@@ -1,6 +1,6 @@
 package source
 
-import "searcher/query"
+import "github.com/RagdollGoDown/Searcher/query"
 
 // Result is a single item returned by a Source. Fields that a particular
 // source can't populate are left at their zero value.

@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"searcher/llm"
-	"searcher/query"
-	"searcher/scraper"
-	"searcher/source"
-	"searcher/store"
+	"github.com/RagdollGoDown/Searcher/llm"
+	"github.com/RagdollGoDown/Searcher/query"
+	"github.com/RagdollGoDown/Searcher/scraper"
+	"github.com/RagdollGoDown/Searcher/source"
+	"github.com/RagdollGoDown/Searcher/store"
 )
 
 //go:embed static

@@ -1,2 +1,4 @@
 .claude
-data/searcher.db
+data/
+*.exe
+*.log

@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"searcher/query"
-	"searcher/source"
-	"searcher/store"
+	"github.com/RagdollGoDown/Searcher/query"
+	"github.com/RagdollGoDown/Searcher/source"
+	"github.com/RagdollGoDown/Searcher/store"
 )
 
 const (

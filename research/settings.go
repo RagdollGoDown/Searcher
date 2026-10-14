@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"searcher/llm"
+	"github.com/RagdollGoDown/Searcher/llm"
 )
 
 // Settings keys for the research loop's persisted, per-feature

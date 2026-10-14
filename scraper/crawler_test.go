@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"searcher/llm"
-	"searcher/scraper"
-	"searcher/source"
-	"searcher/store"
+	"github.com/RagdollGoDown/Searcher/llm"
+	"github.com/RagdollGoDown/Searcher/scraper"
+	"github.com/RagdollGoDown/Searcher/source"
+	"github.com/RagdollGoDown/Searcher/store"
 )
 
 const (

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"searcher/query"
+	"github.com/RagdollGoDown/Searcher/query"
 )
 
 const wikipediaDefaultMaxResults = 10

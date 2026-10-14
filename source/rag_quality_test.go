@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"searcher/llm"
-	"searcher/query"
-	"searcher/store"
+	"github.com/RagdollGoDown/Searcher/llm"
+	"github.com/RagdollGoDown/Searcher/query"
+	"github.com/RagdollGoDown/Searcher/store"
 )
 
 // ragGoldenCase is one golden-set document/query pair for

@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"searcher/llm"
-	"searcher/query"
-	"searcher/store"
+	"github.com/RagdollGoDown/Searcher/llm"
+	"github.com/RagdollGoDown/Searcher/query"
+	"github.com/RagdollGoDown/Searcher/store"
 )
 
 // Settings keys for RAGSource's persisted, per-source configuration

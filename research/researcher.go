@@ -1,6 +1,6 @@
 package research
 
-import "searcher/store"
+import "github.com/RagdollGoDown/Searcher/store"
 
 // Researcher runs research/report-generation jobs as background jobs,
 // mirroring scraper.Crawler's shape: job state (status/progress/report)

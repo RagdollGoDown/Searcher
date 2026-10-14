@@ -2,55 +2,53 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"flag"
 	"log"
 	"net/http"
 
-	"searcher/llm"
-	"searcher/scraper"
-	"searcher/source"
-	"searcher/store"
-	"searcher/web"
+	"github.com/RagdollGoDown/Searcher/llm"
+	"github.com/RagdollGoDown/Searcher/scraper"
+	"github.com/RagdollGoDown/Searcher/source"
+	"github.com/RagdollGoDown/Searcher/store"
+	"github.com/RagdollGoDown/Searcher/web"
 )
 
-const addr = "localhost:8080"
-
-// dbPath is where Searcher's unified local database lives on disk: RAG
-// documents/chunks, saved conversations, and settings.
-const dbPath = "./data/searcher.db"
-
 func main() {
-	client := llm.NewOllamaClient("phi3:mini")
-	if err := client.Init(context.Background()); err != nil {
-		fmt.Printf("Got error initializing LLM client: %s", err)
-		return
+	addr := flag.String("addr", "localhost:8080", "HTTP listen address")
+	chatModel := flag.String("chat-model", "phi3:mini", "Ollama model used for chat")
+	embedModel := flag.String("embed-model", "nomic-embed-text", "Ollama model used for embeddings")
+	dbPath := flag.String("db", "./data/searcher.db", "SQLite database holding documents, conversations, and settings")
+	flag.Parse()
+
+	ctx := context.Background()
+
+	client := llm.NewOllamaClient(*chatModel)
+	if err := client.Init(ctx); err != nil {
+		log.Fatalf("initializing LLM client: %s", err)
 	}
 
-	embedder := llm.NewOllamaEmbedder("nomic-embed-text")
-	if err := embedder.Init(context.Background()); err != nil {
-		fmt.Printf("Got error initializing embedding client: %s", err)
-		return
+	embedder := llm.NewOllamaEmbedder(*embedModel)
+	if err := embedder.Init(ctx); err != nil {
+		log.Fatalf("initializing embedding client: %s", err)
 	}
 
-	db, err := store.Open(dbPath)
+	db, err := store.Open(*dbPath)
 	if err != nil {
-		fmt.Printf("Got error opening database: %s", err)
-		return
+		log.Fatalf("opening database: %s", err)
 	}
 	defer db.Close()
 
 	ragSource := source.NewRAGSource(db, embedder, 2000, 8000)
 	crawler := scraper.NewCrawler(db, ragSource)
 
-	if n, err := db.RecoverInterruptedCrawlJobs(context.Background()); err != nil {
-		fmt.Printf("Got error recovering interrupted crawl jobs: %s\n", err)
+	if n, err := db.RecoverInterruptedCrawlJobs(ctx); err != nil {
+		log.Printf("recovering interrupted crawl jobs: %s", err)
 	} else if n > 0 {
-		fmt.Printf("Marked %d interrupted crawl job(s) failed after restart\n", n)
+		log.Printf("marked %d interrupted crawl job(s) failed after restart", n)
 	}
 
 	sources := map[string]source.Source{
 		"Wikipedia":    source.NewWikipediaSource("en", 5),
-		"Fake":         source.NewFakeSource(),
 		"Local Files":  source.NewFilesSource(20000, 60000),
 		"My Documents": ragSource,
 		// The scraper deliberately has no entry here: it's not a Source
@@ -62,10 +60,9 @@ func main() {
 	server := web.NewServer(client, sources, ragSource, crawler, db)
 	handler, err := server.Handler()
 	if err != nil {
-		fmt.Printf("Got error setting up web server: %s", err)
-		return
+		log.Fatalf("setting up web server: %s", err)
 	}
 
-	fmt.Printf("Listening on http://%s\n", addr)
-	log.Fatal(http.ListenAndServe(addr, handler))
+	log.Printf("listening on http://%s", *addr)
+	log.Fatal(http.ListenAndServe(*addr, handler))
 }

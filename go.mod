@@ -1,4 +1,4 @@
-module searcher
+module github.com/RagdollGoDown/Searcher
 
 go 1.25.0
 

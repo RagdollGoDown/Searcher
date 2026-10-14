@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"searcher/llm"
-	"searcher/store"
+	"github.com/RagdollGoDown/Searcher/llm"
+	"github.com/RagdollGoDown/Searcher/store"
 )
 
 func openTestResearcher(t *testing.T) *Researcher {
