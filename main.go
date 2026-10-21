@@ -38,7 +38,7 @@ func main() {
 	}
 	defer db.Close()
 
-	ragSource := source.NewRAGSource(db, embedder, 2000, 8000)
+	ragSource := source.NewRAGSource(db, embedder, nil, 2000, 8000)
 	crawler := scraper.NewCrawler(db, ragSource)
 
 	if n, err := db.RecoverInterruptedCrawlJobs(ctx); err != nil {

@@ -75,7 +75,7 @@ func TestCrawlerExtractsCleanTextAndRespectsPolicy(t *testing.T) {
 	defer st.Close()
 
 	const embeddingDim = 8
-	rag := source.NewRAGSource(st, llm.NewFakeEmbedder(embeddingDim), 2000, 8000)
+	rag := source.NewRAGSource(st, llm.NewFakeEmbedder(embeddingDim), nil, 2000, 8000)
 	crawler := scraper.NewCrawler(st, rag)
 
 	jobID, err := crawler.StartCrawl(ctx, scraper.Params{

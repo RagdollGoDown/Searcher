@@ -47,15 +47,17 @@ const ragIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
 type RAGSource struct {
 	store         *store.Store
 	embedder      llm.Embedder
+	reranker      Reranker
 	maxChunkChars int
 	maxTotalChars int
 }
 
 // NewRAGSource creates a RAGSource retrieving from st, embedding the query
-// text with embedder. How many chunks a query retrieves is configured via
-// Settings.TopK (see GetSettings/SetSettings), not fixed at construction.
-func NewRAGSource(st *store.Store, embedder llm.Embedder, maxChunkChars, maxTotalChars int) *RAGSource {
-	return &RAGSource{store: st, embedder: embedder, maxChunkChars: maxChunkChars, maxTotalChars: maxTotalChars}
+// text with embedder. A nil reranker keeps the embedding search's order.
+// How many chunks a query retrieves is configured via Settings.TopK (see
+// GetSettings/SetSettings), not fixed at construction.
+func NewRAGSource(st *store.Store, embedder llm.Embedder, reranker Reranker, maxChunkChars, maxTotalChars int) *RAGSource {
+	return &RAGSource{store: st, embedder: embedder, reranker: reranker, maxChunkChars: maxChunkChars, maxTotalChars: maxTotalChars}
 }
 
 // Compile-time check that RAGSource satisfies Source.
@@ -87,9 +89,23 @@ func (s *RAGSource) Fetch(q query.Query) ([]Result, error) {
 		return nil, fmt.Errorf("rag: embedding query: %w", err)
 	}
 
-	chunks, err := s.store.SearchChunks(ctx, vec, settings.TopK)
+	candidates := settings.TopK
+	if s.reranker != nil {
+		candidates *= rerankCandidateFactor
+	}
+	chunks, err := s.store.SearchChunks(ctx, vec, candidates)
 	if err != nil {
 		return nil, fmt.Errorf("rag: searching chunks: %w", err)
+	}
+
+	if s.reranker != nil {
+		chunks, err = s.reranker.Rerank(ctx, q.GetQuery(), chunks)
+		if err != nil {
+			return nil, fmt.Errorf("rag: reranking: %w", err)
+		}
+		if len(chunks) > settings.TopK {
+			chunks = chunks[:settings.TopK]
+		}
 	}
 
 	results := make([]Result, 0, len(chunks))

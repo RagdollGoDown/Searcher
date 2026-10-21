@@ -74,7 +74,7 @@ func TestRAGSourceRecallAtK(t *testing.T) {
 	}
 	defer st.Close()
 
-	rag := NewRAGSource(st, embedder, ragDefaultMaxChunkChars, ragDefaultMaxTotalChars)
+	rag := NewRAGSource(st, embedder, nil, ragDefaultMaxChunkChars, ragDefaultMaxTotalChars)
 	if err := rag.SetSettings(ctx, Settings{
 		ChunkChars:   store.DefaultChunkChars,
 		ChunkOverlap: store.DefaultChunkOverlap,
