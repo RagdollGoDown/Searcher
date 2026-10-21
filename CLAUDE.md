@@ -11,7 +11,6 @@ embeddings). Serves `localhost:8080`.
 - `source/` — pluggable tools and data sources behind the `Source` interface (`Fetch` + `Icon`): Wikipedia, browser-uploaded attachments, and RAG over the document store.
 - `store/` — the single SQLite file holding everything persistent: documents, chunk embeddings, conversations, background job state, and key-value settings.
 - `scraper/` — crawls a site from a root URL and ingests pages into the RAG store, so crawled content is searchable through the existing document source with no separate retrieval path.
-- `research/` — the iterative search loop behind the report-generation feature. Not wired into `web/` yet.
 - `extract/` — decodes non-text formats (currently PDF) to plain text.
 - `query/` — the `Query` type passed to sources, including file attachments.
 - `web/` — HTTP server plus the chat, document, scraper, and settings UIs.
@@ -27,8 +26,7 @@ instead of duplicating them here.
   brute-force cosine similarity rather than Postgres+pgvector, `sqlite-vec`, or an ANN
   index. Raise the tradeoff before reaching for anything heavier.
 - **Keep the LLM backend swappable.** Model-specific behavior belongs behind
-  `llm.Client`/`llm.Embedder`. The research loop's plain-text `SEARCH:` / `DONE`
-  protocol exists for this reason: it works on backends without reliable tool-calling.
+  `llm.Client`/`llm.Embedder`.
 - **Don't generalize a source capability until a second source needs it.** `RAGSource`
   has document-management and settings methods that `web` calls directly rather than
   through `Source`. One example isn't enough to know the right shape for a general
@@ -68,8 +66,6 @@ hardware and should stay readable by one person holding all of it in their head.
 
 ## Future work
 
-- Research/report generation is mid-build. `RESEARCH_PLAN.md` has the task breakdown,
-  phase dependencies, and locked design decisions.
-- Once the Anthropic backend is proven, consider giving it real tool-calling for the
-  search step instead of the plain-text protocol. Likely more reliable there, at the
-  cost of a backend-specific code path.
+- Research/report generation is mid-build on the `research` branch, kept off `main`
+  until it works end to end. `RESEARCH_PLAN.md` there has the task breakdown and
+  locked design decisions.
