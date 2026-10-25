@@ -106,6 +106,17 @@
     width: 140px;
   }
   input[type="number"]:focus { outline: 2px solid var(--accent); }
+  select {
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    max-width: 100%;
+  }
+  select:focus { outline: 2px solid var(--accent); }
   button.primary {
     align-self: flex-start;
     padding: 8px 18px;
@@ -118,7 +129,7 @@
     cursor: pointer;
   }
   button.primary:disabled { opacity: 0.5; cursor: default; }
-  #rag-status {
+  #rag-status, #chat-status, #scraper-status {
     font-size: 13px;
     color: var(--muted);
   }
@@ -134,6 +145,17 @@
     </nav>
   </header>
   <main>
+    <section id="chat-section">
+      <h2>Chat model</h2>
+      <p class="hint">Which backend answers your messages. Applies to your next message. Embeddings for document search always run on Ollama, so switching never affects already-uploaded documents.</p>
+      <div class="field">
+        <label for="chat-provider">Provider</label>
+        <select id="chat-provider"></select>
+        <span id="chat-provider-hint" class="field-hint"></span>
+      </div>
+      <button id="chat-save" class="primary" type="button">Save</button>
+      <div id="chat-status"></div>
+    </section>
     <section id="rag-section">
       <h2>Document search (RAG)</h2>
       <p class="hint">Chunk size and overlap control how newly uploaded documents are split before being embedded — changing them only affects documents you upload after saving, existing documents keep their current chunks. Chunks retrieved applies immediately to your next query.</p>
@@ -177,6 +199,60 @@
 
 <script>
 (() => {
+  const providerLabels = { ollama: "Ollama (local)", anthropic: "Anthropic Claude" };
+  const chatProviderEl = document.getElementById("chat-provider");
+  const chatProviderHintEl = document.getElementById("chat-provider-hint");
+  const chatSaveBtn = document.getElementById("chat-save");
+  const chatStatusEl = document.getElementById("chat-status");
+
+  function renderChatSettings(data) {
+    chatProviderEl.replaceChildren(...data.providers.map((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.name;
+      opt.textContent = (providerLabels[p.name] || p.name) + " — " + p.model + (p.unavailable ? " (unavailable)" : "");
+      opt.disabled = !!p.unavailable;
+      return opt;
+    }));
+    chatProviderEl.value = data.provider;
+    const unavailable = data.providers.filter((p) => p.unavailable);
+    chatProviderHintEl.textContent = unavailable
+      .map((p) => (providerLabels[p.name] || p.name) + " is unavailable: " + p.unavailable + ". Fix it and restart Searcher to enable it.")
+      .join(" ");
+  }
+
+  async function loadChatSettings() {
+    try {
+      const res = await fetch("/api/chat/settings");
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || ("failed with status " + res.status));
+      renderChatSettings(data);
+    } catch (e) {
+      chatStatusEl.textContent = "Could not load settings: " + e.message;
+    }
+  }
+
+  chatSaveBtn.addEventListener("click", async () => {
+    chatSaveBtn.disabled = true;
+    chatStatusEl.textContent = "Saving...";
+    try {
+      const res = await fetch("/api/chat/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: chatProviderEl.value }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || ("failed with status " + res.status));
+      renderChatSettings(data);
+      chatStatusEl.textContent = "Saved. Applies to your next message.";
+    } catch (e) {
+      chatStatusEl.textContent = "Could not save: " + e.message;
+    } finally {
+      chatSaveBtn.disabled = false;
+    }
+  });
+
+  loadChatSettings();
+
   const chunkCharsEl = document.getElementById("chunk-chars");
   const chunkOverlapEl = document.getElementById("chunk-overlap");
   const topKEl = document.getElementById("top-k");

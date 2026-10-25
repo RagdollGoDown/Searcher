@@ -102,8 +102,11 @@ type sourceResultInfo struct {
 
 // Server serves the chat UI and its backing API.
 type Server struct {
-	client  llm.Client
-	sources map[string]source.Source
+	providers []Provider
+	// defaultProvider names the provider used until one is picked on the
+	// settings page. It must be in providers and available.
+	defaultProvider string
+	sources         map[string]source.Source
 	// rag is the RAG document store's Source, used directly (beyond the
 	// Source interface used for chat) to serve the document management
 	// page. nil if RAG document management isn't enabled.
@@ -123,7 +126,8 @@ type Server struct {
 	store *store.Store
 }
 
-// NewServer creates a Server. sources maps a display/toggle name to the
+// NewServer creates a Server. providers are the chat backends the
+// settings page can switch between, starting from defaultProvider. sources maps a display/toggle name to the
 // Source it queries; a chat request selects among them by name. rag, if
 // non-nil, is additionally used to serve the /api/rag/documents management
 // endpoints; it's typically also present in sources so it can be toggled
@@ -131,8 +135,8 @@ type Server struct {
 // /api/scraper management endpoints. convStore, if non-nil, enables saving
 // and retrieving past conversations; it's typically the same store.Store
 // backing rag.
-func NewServer(client llm.Client, sources map[string]source.Source, rag *source.RAGSource, sc *scraper.Crawler, convStore *store.Store) *Server {
-	return &Server{client: client, sources: sources, rag: rag, scraper: sc, store: convStore}
+func NewServer(providers []Provider, defaultProvider string, sources map[string]source.Source, rag *source.RAGSource, sc *scraper.Crawler, convStore *store.Store) *Server {
+	return &Server{providers: providers, defaultProvider: defaultProvider, sources: sources, rag: rag, scraper: sc, store: convStore}
 }
 
 // Handler returns the HTTP handler for the chat UI and API.
@@ -166,6 +170,8 @@ func (s *Server) Handler() (http.Handler, error) {
 		mux.HandleFunc("GET /api/conversations", s.handleListConversations)
 		mux.HandleFunc("GET /api/conversations/{id}/messages", s.handleGetConversationMessages)
 		mux.HandleFunc("DELETE /api/conversations/{id}", s.handleDeleteConversation)
+		mux.HandleFunc("GET /api/chat/settings", s.handleGetChatSettings)
+		mux.HandleFunc("PUT /api/chat/settings", s.handlePutChatSettings)
 	}
 	return mux, nil
 }
@@ -315,8 +321,12 @@ func (s *Server) searchAndSummarize(ctx context.Context, queryText string, sourc
 		{Role: llm.RoleSystem, Content: summarizerSystemPrompt},
 		{Role: llm.RoleUser, Content: b.String()},
 	}
+	p, err := s.activeProvider(ctx)
+	if err != nil {
+		return "", nil, 0, err
+	}
 	llmStart := time.Now()
-	reply, err := s.client.Chat(ctx, messages)
+	reply, err := p.Client.Chat(ctx, messages)
 	llmDuration := time.Since(llmStart)
 	if err != nil {
 		return "", nil, 0, err
@@ -330,8 +340,12 @@ func (s *Server) chat(ctx context.Context, history []llm.Message) (string, time.
 	messages := make([]llm.Message, 0, len(history)+1)
 	messages = append(messages, llm.Message{Role: llm.RoleSystem, Content: chatSystemPrompt})
 	messages = append(messages, history...)
+	p, err := s.activeProvider(ctx)
+	if err != nil {
+		return "", 0, err
+	}
 	start := time.Now()
-	reply, err := s.client.Chat(ctx, messages)
+	reply, err := p.Client.Chat(ctx, messages)
 	return reply, time.Since(start), err
 }
 

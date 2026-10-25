@@ -15,18 +15,39 @@ import (
 
 func main() {
 	addr := flag.String("addr", "localhost:8080", "HTTP listen address")
-	chatModel := flag.String("chat-model", "phi3:mini", "Ollama model used for chat")
+	provider := flag.String("provider", "ollama", `chat backend used until one is picked on the settings page: "ollama" or "anthropic"`)
+	ollamaModel := flag.String("ollama-model", "phi3:mini", "Ollama model used for chat")
+	anthropicModel := flag.String("anthropic-model", "claude-sonnet-5-5", "Anthropic model used for chat (needs ANTHROPIC_API_KEY)")
 	embedModel := flag.String("embed-model", "nomic-embed-text", "Ollama model used for embeddings")
 	dbPath := flag.String("db", "./data/searcher.db", "SQLite database holding documents, conversations, and settings")
 	flag.Parse()
 
 	ctx := context.Background()
 
-	client := llm.NewOllamaClient(*chatModel)
-	if err := client.Init(ctx); err != nil {
-		log.Fatalf("initializing LLM client: %s", err)
+	// Every provider is registered even if it fails to initialize, so the
+	// settings page can show it disabled along with the reason (e.g. no
+	// API key) instead of it silently not existing.
+	providers := []web.Provider{
+		{Name: "ollama", Model: *ollamaModel, Client: llm.NewOllamaClient(*ollamaModel)},
+		{Name: "anthropic", Model: *anthropicModel, Client: llm.NewAnthropicClient(*anthropicModel)},
+	}
+	defaultReason := "unknown provider"
+	for i, p := range providers {
+		err := p.Client.Init(ctx)
+		if err != nil {
+			providers[i].Unavailable = err.Error()
+		}
+		if p.Name == *provider {
+			defaultReason = providers[i].Unavailable
+		}
+	}
+	if defaultReason != "" {
+		log.Fatalf("-provider %q: %s", *provider, defaultReason)
 	}
 
+	// Embeddings stay on Ollama regardless of -provider: Anthropic has no
+	// embeddings API, and keeping one embedder means switching chat
+	// providers never invalidates already-stored chunk vectors.
 	embedder := llm.NewOllamaEmbedder(*embedModel)
 	if err := embedder.Init(ctx); err != nil {
 		log.Fatalf("initializing embedding client: %s", err)
@@ -57,7 +78,7 @@ func main() {
 		// covers scraped content too, with no separate retrieval path.
 	}
 
-	server := web.NewServer(client, sources, ragSource, crawler, db)
+	server := web.NewServer(providers, *provider, sources, ragSource, crawler, db)
 	handler, err := server.Handler()
 	if err != nil {
 		log.Fatalf("setting up web server: %s", err)
