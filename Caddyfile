@@ -1,7 +1,46 @@
 {$DOMAIN} {
-	basic_auth {
-		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	rate_limit {
+		zone global {
+			key {http.request.remote.host}
+			window 1m
+			events 60
+		}
+		zone chat {
+			key {http.request.remote.host}
+			window 1m
+			events 10
+			match {
+				path /api/chat
+			}
+		}
+		zone uploads {
+			key {http.request.remote.host}
+			window 10m
+			events 5
+			match {
+				path /api/rag/documents
+			}
+		}
+		zone crawls {
+			key {http.request.remote.host}
+			window 10m
+			events 2
+			match {
+				path /api/scraper/jobs
+			}
+		}
 	}
 
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	}
+
+	request_body {
+		max_size 25MB
+	}
 	reverse_proxy searcher:8080
 }

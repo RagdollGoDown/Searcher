@@ -1,12 +1,11 @@
 services:
   caddy:
-    image: caddy:2-alpine
+    build:
+      context: ./caddy
     depends_on:
       searcher:
         condition: service_started
     environment:
-      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:?set BASIC_AUTH_HASH in .env}
-      BASIC_AUTH_USER: ${BASIC_AUTH_USER:?set BASIC_AUTH_USER in .env}
       DOMAIN: ${DOMAIN:?set DOMAIN in .env}
     ports:
       - "80:80"
