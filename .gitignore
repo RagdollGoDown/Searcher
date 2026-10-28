@@ -1,4 +1,5 @@
 .claude
 data/
+.env
 *.exe
 *.log

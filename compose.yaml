@@ -1,4 +1,22 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      searcher:
+        condition: service_started
+    environment:
+      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:?set BASIC_AUTH_HASH in .env}
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER:?set BASIC_AUTH_USER in .env}
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
   searcher:
     build:
       context: .
@@ -12,8 +30,6 @@ services:
       - 0.0.0.0:8080
       - -db
       - /app/data/searcher.db
-    ports:
-      - "8080:8080"
     restart: unless-stopped
     volumes:
       - searcher-data:/app/data
@@ -44,5 +60,7 @@ services:
       - ollama-models:/root/.ollama
 
 volumes:
+  caddy-data:
+  caddy-config:
   searcher-data:
   ollama-models:
