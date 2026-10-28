@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"slices"
 	"time"
 )
 
@@ -144,7 +145,82 @@ type ollamaChatResponse struct {
 	Done    bool          `json:"done"`
 }
 
-func (c *OllamaClient) Chat(ctx context.Context, messages []Message) (string, error) {
+type ollamaTagsResponse struct {
+	Models []struct {
+		Name string `json:"name"`
+	} `json:"models"`
+}
+
+// Models lists the models pulled onto the Ollama server that can chat,
+// leaving out embedding-only models, which the embedder owns.
+func (c *OllamaClient) Models(ctx context.Context) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/tags", nil)
+	if err != nil {
+		return nil, fmt.Errorf("ollama: building request: %w", err)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ollama: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ollama: unexpected status %d", resp.StatusCode)
+	}
+
+	var tags ollamaTagsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
+		return nil, fmt.Errorf("ollama: decoding response: %w", err)
+	}
+
+	names := make([]string, 0, len(tags.Models))
+	for _, m := range tags.Models {
+		if c.canChat(ctx, m.Name) {
+			names = append(names, m.Name)
+		}
+	}
+	return names, nil
+}
+
+// canChat reports whether model supports chat completion. /api/tags
+// doesn't say, so this asks /api/show. Anything it can't determine (older
+// servers don't report capabilities) counts as chat-capable, so a model
+// is hidden only when the server positively says it can't chat.
+func (c *OllamaClient) canChat(ctx context.Context, model string) bool {
+	body, err := json.Marshal(map[string]string{"model": model})
+	if err != nil {
+		return true
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/show", bytes.NewReader(body))
+	if err != nil {
+		return true
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return true
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return true
+	}
+
+	var show struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&show); err != nil || len(show.Capabilities) == 0 {
+		return true
+	}
+	return slices.Contains(show.Capabilities, "completion")
+}
+
+func (c *OllamaClient) Chat(ctx context.Context, model string, messages []Message) (string, error) {
+	if model == "" {
+		model = c.model
+	}
+
 	fmt.Println("chatting with ollama client")
 
 	reqMessages := make([]ollamaMessage, len(messages))
@@ -153,7 +229,7 @@ func (c *OllamaClient) Chat(ctx context.Context, messages []Message) (string, er
 	}
 
 	body, err := json.Marshal(ollamaChatRequest{
-		Model:    c.model,
+		Model:    model,
 		Messages: reqMessages,
 		Stream:   false,
 	})

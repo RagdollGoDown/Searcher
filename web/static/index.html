@@ -68,6 +68,7 @@
     font-size: 13px;
   }
   header nav a:hover { text-decoration: underline; }
+  #model-select { margin-left: auto; max-width: 180px; font-size: 13px; }
   #history-btn {
     display: inline-flex;
     align-items: center;
@@ -448,6 +449,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
     </button>
     <h1>Searcher</h1>
+    <select id="model-select" title="Model" aria-label="Model"></select>
     <nav>
       <a href="/rag.html">Documents</a>
       <a href="/scraper.html">Scraper</a>
@@ -511,6 +513,22 @@
 
   const history = [];
   const enabledSources = new Set();
+
+  const modelSelect = document.getElementById("model-select");
+  async function loadModels() {
+    try {
+      const res = await fetch("/api/models");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      for (const name of data.models) modelSelect.add(new Option(name, name));
+      const saved = localStorage.getItem("model");
+      if (data.models.includes(saved)) modelSelect.value = saved;
+    } catch (e) {
+      modelSelect.hidden = true;
+    }
+  }
+  modelSelect.addEventListener("change", () => localStorage.setItem("model", modelSelect.value));
+  loadModels();
   const attachedFiles = []; // { name, content, encoding?, mimeType? }
   // currentConversationId is null until the first turn of a chat gets
   // saved server-side (which mints one), or until a past conversation is
@@ -786,6 +804,7 @@
           sources: Array.from(enabledSources),
           files: attachedFiles.map(({ name, content, encoding, mimeType }) => ({ name, content, encoding, mimeType })),
           conversationId: currentConversationId || 0,
+          model: modelSelect.value,
         }),
       });
       const data = await res.json();
