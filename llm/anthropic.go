@@ -83,7 +83,17 @@ type anthropicChatResponse struct {
 	Content []anthropicContentBlock `json:"content"`
 }
 
-func (c *AnthropicClient) Chat(ctx context.Context, messages []Message) (string, error) {
+// Models returns only the configured model: the API's model list isn't
+// worth a network call for a backend that is rarely switched mid-session.
+func (c *AnthropicClient) Models(ctx context.Context) ([]string, error) {
+	return []string{c.model}, nil
+}
+
+func (c *AnthropicClient) Chat(ctx context.Context, model string, messages []Message) (string, error) {
+	if model == "" {
+		model = c.model
+	}
+
 	// The Messages API takes "system" as a separate top-level field, not
 	// a message role, unlike Ollama's /api/chat — so system-role messages
 	// are pulled out of the slice and joined instead of passed through.
@@ -98,7 +108,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []Message) (string,
 	}
 
 	body, err := json.Marshal(anthropicChatRequest{
-		Model:     c.model,
+		Model:     model,
 		MaxTokens: anthropicMaxTokens,
 		System:    strings.Join(system, "\n\n"),
 		Messages:  reqMessages,
