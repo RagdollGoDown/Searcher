@@ -42,13 +42,10 @@ type chatRequest struct {
 	// the newest user message.
 	Messages []llm.Message `json:"messages"`
 	// Sources, when non-empty, names which registered Sources to query for
-	// the newest message; results are fetched and summarized instead of
-	// chatting directly with the LLM. Empty means a plain LLM chat.
+	// the newest message. Attachments are always included automatically.
 	Sources []string `json:"sources"`
 	// Files, when non-empty, are attachments (e.g. picked in the browser)
-	// made available to Sources via the Query, such as the "Local Files"
-	// source. Has no effect unless a Source that reads attachments is also
-	// named in Sources.
+	// included with the newest message.
 	Files []fileAttachment `json:"files"`
 	// ConversationID identifies which saved conversation this turn belongs
 	// to. 0 means "start a new conversation", titled from this message.
@@ -124,6 +121,7 @@ type Server struct {
 	// tool), so unlike rag this is used directly, with no Source-interface
 	// wrapper.
 	store *store.Store
+	files *source.FilesSource
 }
 
 // NewServer creates a Server. providers are the chat backends the
@@ -136,7 +134,15 @@ type Server struct {
 // and retrieving past conversations; it's typically the same store.Store
 // backing rag.
 func NewServer(providers []Provider, defaultProvider string, sources map[string]source.Source, rag *source.RAGSource, sc *scraper.Crawler, convStore *store.Store) *Server {
-	return &Server{providers: providers, defaultProvider: defaultProvider, sources: sources, rag: rag, scraper: sc, store: convStore}
+	return &Server{
+		providers:       providers,
+		defaultProvider: defaultProvider,
+		sources:         sources,
+		rag:             rag,
+		scraper:         sc,
+		store:           convStore,
+		files:           source.NewFilesSource(0, 0),
+	}
 }
 
 // Handler returns the HTTP handler for the chat UI and API.
@@ -277,8 +283,7 @@ func conversationTitle(firstMessage string) string {
 }
 
 // searchAndSummarize fetches search results for queryText from each named
-// source and asks the LLM for a single summary answering it. files are made
-// available to sources (e.g. "Local Files") as query attachments. It
+// source, includes any attached files, and asks the LLM for a single summary. It
 // returns the summary along with each source's raw results, grouped by
 // source, so the caller can show the user what was actually retrieved, and
 // how long the summarizing LLM call took.
@@ -290,7 +295,21 @@ func (s *Server) searchAndSummarize(ctx context.Context, queryText string, sourc
 	q := query.NewQuery(queryText, attachments...)
 
 	var results []source.Result
-	grouped := make([]sourceResults, 0, len(sourceNames))
+	grouped := make([]sourceResults, 0, len(sourceNames)+1)
+	if len(attachments) > 0 {
+		fetchStart := time.Now()
+		r, err := s.files.Fetch(*q)
+		fetchDuration := time.Since(fetchStart)
+		if err != nil {
+			return "", nil, 0, fmt.Errorf("fetching attached files: %w", err)
+		}
+		results = append(results, r...)
+		infos := make([]sourceResultInfo, len(r))
+		for i, res := range r {
+			infos[i] = sourceResultInfo{Title: res.Title, Extract: res.Extract}
+		}
+		grouped = append(grouped, sourceResults{Source: "Attached files", Results: infos, DurationMs: fetchDuration.Milliseconds()})
+	}
 	for _, name := range sourceNames {
 		src, ok := s.sources[name]
 		if !ok {
