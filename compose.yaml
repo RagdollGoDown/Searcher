@@ -1,0 +1,65 @@
+services:
+  caddy:
+    build:
+      context: ./caddy
+    depends_on:
+      searcher:
+        condition: service_started
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  searcher:
+    build:
+      context: .
+    depends_on:
+      ollama-models:
+        condition: service_completed_successfully
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    command:
+      - -addr
+      - 0.0.0.0:8080
+      - -db
+      - /app/data/searcher.db
+    restart: unless-stopped
+    volumes:
+      - searcher-data:/app/data
+
+  ollama:
+    image: ollama/ollama:latest
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+
+  ollama-models:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - ollama pull phi3:mini && ollama pull nomic-embed-text
+    restart: "no"
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  caddy-data:
+  caddy-config:
+  searcher-data:
+  ollama-models:
