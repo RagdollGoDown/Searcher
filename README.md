@@ -10,7 +10,7 @@ consumer hardware. It's a single Go binary with no CGO, backed by a local
   Anthropic API. Pick the provider on the settings page.
 - **Wikipedia search**: the model can look things up on Wikipedia while answering.
 
-  > [!WARNING]
+  > ⚠️
   > Wikipedia often refuses these requests, so lookups can fail.
 
 - **File attachments**: attach text, code, or PDF files to a chat message.
