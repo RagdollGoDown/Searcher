@@ -1,0 +1,89 @@
+/* Every theme must define every variable below, so no page falls back to
+   another theme's colours. Each data-theme value must also be listed in
+   themes in ui.go. */
+:root {
+  color-scheme: light dark;
+  --bg: #f5f5f5;
+  --panel: #ffffff;
+  --text: #1a1a1a;
+  --muted: #6b6b6b;
+  --border: #e0e0e0;
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.12);
+  --on-accent: #ffffff;
+  --danger: #d33;
+  --user-bubble: #2563eb;
+  --user-text: #ffffff;
+  --assistant-bubble: #eef0f3;
+  --assistant-text: #1a1a1a;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+/* The dark palette is repeated for data-theme="dark" below, since CSS can't
+   share one declaration block between a media query and a selector. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]), :root[data-theme="system"] {
+    --bg: #17181c;
+    --panel: #1f2025;
+    --text: #e8e8e8;
+    --muted: #9a9a9a;
+    --border: #2c2d33;
+    --accent: #5b8def;
+    --accent-soft: rgba(91, 141, 239, 0.18);
+    --on-accent: #ffffff;
+    --danger: #e66;
+    --user-bubble: #3556a8;
+    --user-text: #ffffff;
+    --assistant-bubble: #2a2b31;
+    --assistant-text: #e8e8e8;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #17181c;
+  --panel: #1f2025;
+  --text: #e8e8e8;
+  --muted: #9a9a9a;
+  --border: #2c2d33;
+  --accent: #5b8def;
+  --accent-soft: rgba(91, 141, 239, 0.18);
+  --on-accent: #ffffff;
+  --danger: #e66;
+  --user-bubble: #3556a8;
+  --user-text: #ffffff;
+  --assistant-bubble: #2a2b31;
+  --assistant-text: #e8e8e8;
+}
+:root[data-theme="high-contrast"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --panel: #000000;
+  --text: #ffffff;
+  --muted: #d0d0d0;
+  --border: #ffffff;
+  --accent: #ffd60a;
+  --accent-soft: rgba(255, 214, 10, 0.25);
+  --on-accent: #000000;
+  --danger: #ff6b6b;
+  --user-bubble: #ffd60a;
+  --user-text: #000000;
+  --assistant-bubble: #1a1a1a;
+  --assistant-text: #ffffff;
+}
+:root[data-theme="sepia"] {
+  color-scheme: light;
+  --bg: #f4ecd8;
+  --panel: #fbf6e9;
+  --text: #3b2f20;
+  --muted: #7a6a55;
+  --border: #e0d3b8;
+  --accent: #9a5b13;
+  --accent-soft: rgba(154, 91, 19, 0.14);
+  --on-accent: #ffffff;
+  --danger: #b3261e;
+  --user-bubble: #9a5b13;
+  --user-text: #ffffff;
+  --assistant-bubble: #ebe0c7;
+  --assistant-text: #3b2f20;
+}
