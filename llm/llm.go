@@ -26,12 +26,8 @@ type Client interface {
 	// that need no setup can treat it as a no-op.
 	Init(ctx context.Context) error
 
-	// Chat sends messages to model, or to the client's default model if
-	// model is empty. model should be one of the names Models returns.
-	Chat(ctx context.Context, model string, messages []Message) (string, error)
-
-	// Models lists the model names Chat accepts.
-	Models(ctx context.Context) ([]string, error)
+	// Chat sends messages to the client's configured model.
+	Chat(ctx context.Context, messages []Message) (string, error)
 }
 
 // Embedder turns text into a vector embedding, for callers that need

@@ -54,9 +54,6 @@ type chatRequest struct {
 	// to. 0 means "start a new conversation", titled from this message.
 	// Ignored if conversation persistence isn't enabled.
 	ConversationID int64 `json:"conversationId"`
-	// Model selects which of the LLM's models answers. Empty uses the
-	// client's default.
-	Model string `json:"model"`
 }
 
 // fileAttachment is a single file's content supplied by the client.
@@ -153,7 +150,6 @@ func (s *Server) Handler() (http.Handler, error) {
 	mux.Handle("/", http.FileServer(http.FS(staticRoot)))
 	mux.HandleFunc("/api/sources", s.handleSources)
 	mux.HandleFunc("/api/chat", s.handleChat)
-	mux.HandleFunc("GET /api/models", s.handleModels)
 	if s.rag != nil {
 		mux.HandleFunc("GET /api/rag/documents", s.handleListDocuments)
 		mux.HandleFunc("POST /api/rag/documents", s.handleUploadDocument)
@@ -201,17 +197,6 @@ func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string][]sourceInfo{"sources": infos})
 }
 
-// handleModels lists the models the LLM backend offers, for the frontend's
-// model picker.
-func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	models, err := s.client.Models(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string][]string{"models": models})
-}
-
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	requestStart := time.Now()
 	if r.Method != http.MethodPost {
@@ -236,9 +221,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	var llmDuration time.Duration
 	var err error
 	if len(req.Sources) > 0 || len(req.Files) > 0 {
-		reply, grouped, llmDuration, err = s.searchAndSummarize(r.Context(), req.Model, userText, req.Sources, req.Files)
+		reply, grouped, llmDuration, err = s.searchAndSummarize(r.Context(), userText, req.Sources, req.Files)
 	} else {
-		reply, llmDuration, err = s.chat(r.Context(), req.Model, req.Messages)
+		reply, llmDuration, err = s.chat(r.Context(), req.Messages)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, chatResponseBody{Error: err.Error()})
@@ -297,7 +282,7 @@ func conversationTitle(firstMessage string) string {
 // returns the summary along with each source's raw results, grouped by
 // source, so the caller can show the user what was actually retrieved, and
 // how long the summarizing LLM call took.
-func (s *Server) searchAndSummarize(ctx context.Context, model, queryText string, sourceNames []string, files []fileAttachment) (string, []sourceResults, time.Duration, error) {
+func (s *Server) searchAndSummarize(ctx context.Context, queryText string, sourceNames []string, files []fileAttachment) (string, []sourceResults, time.Duration, error) {
 	attachments := make([]query.Attachment, len(files))
 	for i, f := range files {
 		attachments[i] = query.Attachment{Name: f.Name, Content: f.Content, Encoding: f.Encoding, MimeType: f.MimeType}
@@ -341,7 +326,7 @@ func (s *Server) searchAndSummarize(ctx context.Context, model, queryText string
 		return "", nil, 0, err
 	}
 	llmStart := time.Now()
-	reply, err := p.Client.Chat(ctx, model, messages)
+	reply, err := p.Client.Chat(ctx, messages)
 	llmDuration := time.Since(llmStart)
 	if err != nil {
 		return "", nil, 0, err
@@ -351,7 +336,7 @@ func (s *Server) searchAndSummarize(ctx context.Context, model, queryText string
 
 // chat relays the conversation directly to the LLM, also returning how long
 // the Chat call took.
-func (s *Server) chat(ctx context.Context, model string, history []llm.Message) (string, time.Duration, error) {
+func (s *Server) chat(ctx context.Context, history []llm.Message) (string, time.Duration, error) {
 	messages := make([]llm.Message, 0, len(history)+1)
 	messages = append(messages, llm.Message{Role: llm.RoleSystem, Content: chatSystemPrompt})
 	messages = append(messages, history...)
@@ -360,7 +345,7 @@ func (s *Server) chat(ctx context.Context, model string, history []llm.Message) 
 		return "", 0, err
 	}
 	start := time.Now()
-	reply, err := p.Client.Chat(ctx, model, messages)
+	reply, err := p.Client.Chat(ctx, messages)
 	return reply, time.Since(start), err
 }
 
