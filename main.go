@@ -70,7 +70,6 @@ func main() {
 
 	sources := map[string]source.Source{
 		"Wikipedia":    source.NewWikipediaSource("en", 5),
-		"Local Files":  source.NewFilesSource(20000, 60000),
 		"My Documents": ragSource,
 		// The scraper deliberately has no entry here: it's not a Source
 		// itself (no Fetch/Icon) — crawled pages are ingested into the

@@ -90,6 +90,30 @@ func TestSwitchProvider(t *testing.T) {
 	}
 }
 
+func TestAttachmentsAreIncludedAutomatically(t *testing.T) {
+	srv := newProviderTestServer(t, openTestStore(t), "")
+	body := `{"messages":[{"role":"user","content":"summarize this"}],"files":[{"name":"note.txt","content":"attached text"}]}`
+	resp, err := http.Post(srv.URL+"/api/chat", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /api/chat: %s", err)
+	}
+	defer resp.Body.Close()
+
+	var reply chatResponseBody
+	if err := json.NewDecoder(resp.Body).Decode(&reply); err != nil {
+		t.Fatalf("decoding chat response: %s", err)
+	}
+	if reply.Error != "" {
+		t.Fatalf("chat error: %s", reply.Error)
+	}
+	if len(reply.Sources) != 1 || reply.Sources[0].Source != "Attached files" {
+		t.Fatalf("sources = %+v, want one Attached files result", reply.Sources)
+	}
+	if len(reply.Sources[0].Results) != 1 || reply.Sources[0].Results[0].Extract != "attached text" {
+		t.Fatalf("attached results = %+v, want note.txt with its content", reply.Sources[0].Results)
+	}
+}
+
 func TestRejectsUnknownOrUnavailableProvider(t *testing.T) {
 	srv := newProviderTestServer(t, openTestStore(t), "ANTHROPIC_API_KEY is not set")
 
