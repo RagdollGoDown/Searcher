@@ -128,8 +128,11 @@ func (s *WikipediaSource) getJSON(endpoint string, v any) error {
 		return fmt.Errorf("wikipedia: building request: %w", err)
 	}
 
-	// Wikimedia requires a descriptive User-Agent and may block requests without one.
-	req.Header.Set("User-Agent", "Searcher/1.0 (https://github.com/searcher; contact@example.com)")
+	// Wikimedia allows 200 requests/min to clients whose User-Agent carries a
+	// real contact URL, but only 10/min to ones it can't identify, a placeholder
+	// URL included. Every Fetch makes two requests, so the low tier runs out
+	// after a few chat turns.
+	req.Header.Set("User-Agent", "Searcher (https://github.com/RagdollGoDown/Searcher)")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
