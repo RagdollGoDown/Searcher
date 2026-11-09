@@ -33,6 +33,10 @@ go run .
 
 Then open <http://localhost:8080>.
 
+Prebuilt binaries for Linux (including 32-bit and 64-bit ARM), macOS, and Windows
+are on the [releases page](https://github.com/RagdollGoDown/Searcher/releases).
+They need Ollama too, but not Go.
+
 Useful flags (see `go run . -h` for all of them):
 
 | Flag | Default | |

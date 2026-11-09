@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -13,7 +14,11 @@ import (
 	"github.com/RagdollGoDown/Searcher/web"
 )
 
+// version is set by the release workflow via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	addr := flag.String("addr", "localhost:8080", "HTTP listen address")
 	provider := flag.String("provider", "ollama", `chat backend used until one is picked on the settings page: "ollama" or "anthropic"`)
 	ollamaModel := flag.String("ollama-model", "phi3:mini", "Ollama model used for chat")
@@ -21,6 +26,11 @@ func main() {
 	embedModel := flag.String("embed-model", "nomic-embed-text", "Ollama model used for embeddings")
 	dbPath := flag.String("db", "./data/searcher.db", "SQLite database holding documents, conversations, and settings")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	ctx := context.Background()
 
